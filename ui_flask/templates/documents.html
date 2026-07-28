@@ -1,0 +1,204 @@
+{% extends "base.html" %} {% block title %}Documents Library - AI RAG
+Chatbot{% endblock %} {% block content %}
+<div class="row">
+  <div class="col-lg-10 mx-auto">
+    <div class="card shadow">
+      <div
+        class="card-header bg-info text-white d-flex justify-content-between align-items-center"
+      >
+        <h4 class="mb-0">
+          <i class="fas fa-folder-open"></i> Document Library
+        </h4>
+        <button class="btn btn-light btn-sm" onclick="location.reload()">
+          <i class="fas fa-sync-alt"></i> Refresh
+        </button>
+      </div>
+      <div class="card-body">
+        {% if documents and documents|length > 0 %}
+        <!-- Documents Table -->
+        <div class="table-responsive">
+          <table class="table table-hover">
+            <thead class="table-light">
+              <tr>
+                <th><i class="fas fa-file-pdf"></i> Filename</th>
+                <th><i class="fas fa-hashtag"></i> Pages</th>
+                <th><i class="fas fa-cubes"></i> Chunks</th>
+                <th><i class="fas fa-calendar"></i> Uploaded</th>
+                <th><i class="fas fa-cog"></i> Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for doc in documents %}
+              <tr id="doc-{{ doc.doc_id }}">
+                <td>
+                  <i class="fas fa-file-pdf text-danger"></i>
+                  <strong>{{ doc.source_filename }}</strong>
+                  <br />
+                  <small class="text-muted">ID: {{ doc.doc_id[:8] }}...</small>
+                </td>
+                <td>{{ doc.pages if doc.pages else 'N/A' }}</td>
+                <td><span class="badge bg-primary">{{ doc.chunks }}</span></td>
+                <td>
+                  <small>{{ doc.ingested_at[:10] }}</small>
+                  <br />
+                  <small class="text-muted">{{ doc.ingested_at[11:19] }}</small>
+                </td>
+                <td>
+                  <button
+                    class="btn btn-sm btn-outline-primary"
+                    onclick="viewDocument('{{ doc.doc_id }}')"
+                  >
+                    <i class="fas fa-eye"></i> View
+                  </button>
+                  <button
+                    class="btn btn-sm btn-outline-danger"
+                    onclick="deleteDocument('{{ doc.doc_id }}', '{{ doc.source_filename }}')"
+                  >
+                    <i class="fas fa-trash"></i> Delete
+                  </button>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Summary -->
+        <div class="alert alert-light mt-3">
+          <i class="fas fa-chart-bar"></i>
+          <strong>Total:</strong> {{ documents|length }} document(s) |
+          <strong>Total Chunks:</strong> {{ documents|sum(attribute='chunks') }}
+        </div>
+        {% else %}
+        <!-- No Documents -->
+        <div class="text-center py-5">
+          <i class="fas fa-folder-open fa-4x text-muted mb-3"></i>
+          <h5>No documents uploaded yet</h5>
+          <p class="text-muted">
+            Upload your first PDF document to get started
+          </p>
+          <a href="/upload" class="btn btn-warning">
+            <i class="fas fa-upload"></i> Upload Documents
+          </a>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Document Details Modal -->
+<div class="modal fade" id="docModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">
+          <i class="fas fa-file-alt"></i> Document Details
+        </h5>
+        <button
+          type="button"
+          class="btn-close"
+          data-bs-dismiss="modal"
+        ></button>
+      </div>
+      <div class="modal-body" id="docModalBody">
+        <div class="text-center">
+          <div class="spinner-border" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block extra_js %}
+<script>
+  async function viewDocument(docId) {
+    const modal = new bootstrap.Modal(document.getElementById("docModal"));
+    const modalBody = document.getElementById("docModalBody");
+
+    modal.show();
+    modalBody.innerHTML =
+      '<div class="text-center"><div class="spinner-border" role="status"></div></div>';
+
+    try {
+      const response = await fetch(`/api/documents/${docId}`);
+      const doc = await response.json();
+
+      if (doc.error) {
+        modalBody.innerHTML = `<div class="alert alert-danger">${doc.error}</div>`;
+        return;
+      }
+
+      modalBody.innerHTML = `
+                <dl class="row">
+                    <dt class="col-sm-3">Document ID</dt>
+                    <dd class="col-sm-9"><code>${doc.doc_id}</code></dd>
+                    
+                    <dt class="col-sm-3">Filename</dt>
+                    <dd class="col-sm-9">${doc.source_filename}</dd>
+                    
+                    <dt class="col-sm-3">Pages</dt>
+                    <dd class="col-sm-9">${doc.pages || "N/A"}</dd>
+                    
+                    <dt class="col-sm-3">Chunks</dt>
+                    <dd class="col-sm-9">${doc.chunks}</dd>
+                    
+                    <dt class="col-sm-3">Uploaded</dt>
+                    <dd class="col-sm-9">${doc.ingested_at}</dd>
+                </dl>
+            `;
+    } catch (error) {
+      modalBody.innerHTML = `<div class="alert alert-danger">Error loading document: ${error.message}</div>`;
+    }
+  }
+
+  async function deleteDocument(docId, filename) {
+    if (
+      !confirm(
+        `Are you sure you want to delete "${filename}"?\n\nThis will remove the document, its chunks, and Gemini embeddings from ChromaDB.`
+      )
+    ) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/documents/${docId}`, {
+        method: "DELETE",
+      });
+      const result = await response.json();
+
+      if (result.error) {
+        alert(`Error: ${result.error}`);
+        return;
+      }
+
+      // Remove row from table
+      document.getElementById(`doc-${docId}`).remove();
+
+      // Show success message
+      const alert = document.createElement("div");
+      alert.className = "alert alert-success alert-dismissible fade show";
+      alert.innerHTML = `
+                <i class="fas fa-check-circle"></i> Successfully deleted "${filename}"
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+      document
+        .querySelector(".card-body")
+        .insertBefore(alert, document.querySelector(".table-responsive"));
+
+      // Reload if no documents left
+      if (document.querySelectorAll("tbody tr").length === 0) {
+        setTimeout(() => location.reload(), 1500);
+      }
+    } catch (error) {
+      alert(`Error deleting document: ${error.message}`);
+    }
+  }
+</script>
+{% endblock %}

@@ -1,0 +1,104 @@
+{% extends "base.html" %} {% block title %}Upload Documents - Local RAG
+Chatbot{% endblock %} {% block content %}
+<div class="row">
+  <div class="col-lg-8 mx-auto">
+    <div class="card shadow">
+      <div class="card-header bg-warning text-dark">
+        <h4 class="mb-0"><i class="fas fa-upload"></i> Upload PDF Documents</h4>
+      </div>
+      <div class="card-body">
+        <!-- Upload Form -->
+        <div class="mb-4">
+          <div
+            class="upload-area border border-2 border-dashed rounded p-5 text-center"
+            id="uploadArea"
+            ondrop="handleDrop(event)"
+            ondragover="handleDragOver(event)"
+            ondragleave="handleDragLeave(event)"
+          >
+            <i class="fas fa-cloud-upload-alt fa-4x text-muted mb-3"></i>
+            <h5>Drag and drop PDF files here</h5>
+            <p class="text-muted">or</p>
+            <input
+              type="file"
+              id="fileInput"
+              class="d-none"
+              accept=".pdf"
+              multiple
+              onchange="handleFileSelect(event)"
+            />
+            <button
+              class="btn btn-warning"
+              onclick="document.getElementById('fileInput').click()"
+            >
+              <i class="fas fa-folder-open"></i> Browse Files
+            </button>
+            <p class="text-muted mt-3 mb-0">
+              <small>Maximum file size: 50MB per file</small>
+            </p>
+          </div>
+        </div>
+
+        <!-- Upload Progress -->
+        <div id="uploadProgress" style="display: none">
+          <div class="alert alert-info">
+            <div class="d-flex align-items-center">
+              <div class="spinner-border spinner-border-sm me-2" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+              <div class="flex-grow-1">
+                <strong>Processing document...</strong>
+                <div class="progress mt-2" style="height: 5px">
+                  <div
+                    id="progressBar"
+                    class="progress-bar progress-bar-striped progress-bar-animated"
+                    role="progressbar"
+                    style="width: 0%"
+                  ></div>
+                </div>
+                <small id="progressText" class="text-muted"
+                  >Starting upload...</small
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Upload Results -->
+        <div id="uploadResults"></div>
+
+        <!-- Instructions -->
+        <div class="card mt-4">
+          <div class="card-header">
+            <i class="fas fa-info-circle"></i> Upload Instructions
+          </div>
+          <div class="card-body">
+            <ol class="mb-0">
+              <li>Select one or more PDF documents to upload</li>
+              <li>Wait for the system to process documents using Gemini Embeddings.</li>
+              <li>
+                Once processing is complete, you can chat with the AI about the
+                content
+              </li>
+              <li>
+                View all uploaded documents in the
+                <a href="/documents">Documents Library</a>
+              </li>
+            </ol>
+          </div>
+        </div>
+
+        <!-- Processing Info -->
+        <div class="alert alert-info mt-4">
+          <i class="fas fa-lightbulb"></i> <strong>Note:</strong>
+          Documents are processed using Gemini Embeddings and stored in ChromaDB.
+          Processing time depends on document size (typically 1 page per
+          second).
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block extra_js %}
+<script src="{{ url_for('static', filename='js/upload.js') }}"></script>
+{% endblock %}

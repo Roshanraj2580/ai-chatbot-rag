@@ -1,0 +1,81 @@
+{% extends "base.html" %} {% block title %}Chat - AI RAG Chatbot{% endblock
+%} {% block content %}
+<div class="row">
+  <div class="col-lg-8 mx-auto">
+    <div class="card shadow">
+      <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+        <h4 class="mb-0">
+          <i class="fas fa-comments"></i> Chat with Your Documents
+        </h4>
+        <span id="retrievalModeBadge" class="badge bg-light text-dark">
+          <i class="fas fa-spinner fa-spin"></i> Loading...
+        </span>
+      </div>
+      <div class="card-body p-0">
+        <!-- Chat Messages Container -->
+        <div id="chatMessages" class="chat-messages p-3">
+          <div class="text-center text-muted">
+            <i class="fas fa-comment-dots fa-2x mb-2"></i>
+            <p>Start asking questions about your documents...</p>
+          </div>
+        </div>
+
+        <!-- Chat Input -->
+        <div class="chat-input-container p-3 border-top">
+          <div class="input-group">
+            <input
+              type="text"
+              id="messageInput"
+              class="form-control"
+              placeholder="Ask a question about your documents..."
+              onkeypress="handleKeyPress(event)"
+            />
+            <button class="btn btn-primary" onclick="sendMessage()">
+              <i class="fas fa-paper-plane"></i> Send
+            </button>
+          </div>
+          <div
+            id="loadingIndicator"
+            class="mt-2 text-center"
+            style="display: none"
+          >
+            <div
+              class="spinner-border spinner-border-sm text-primary"
+              role="status"
+            >
+              <span class="visually-hidden">Loading...</span>
+            </div>
+            <span class="ms-2 text-muted">Thinking...</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Retrieved Chunks Panel (Collapsible) -->
+    <div class="card mt-3 shadow">
+      <div class="card-header">
+        <button
+          class="btn btn-link text-decoration-none w-100 text-start"
+          type="button"
+          data-bs-toggle="collapse"
+          data-bs-target="#retrievedChunks"
+        >
+          <i class="fas fa-file-alt"></i> Retrieved Context Chunks
+          <i class="fas fa-chevron-down float-end"></i>
+        </button>
+      </div>
+      <div id="retrievedChunks" class="collapse">
+        <div class="card-body">
+          <div id="chunksContent">
+            <p class="text-muted">
+              Retrieved context will appear here after each query.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %} {% block extra_js %}
+<script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+{% endblock %}

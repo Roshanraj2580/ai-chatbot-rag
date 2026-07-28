@@ -1,0 +1,45 @@
+# Core Dependencies - Direct imports used by the project
+# Backend API
+fastapi==0.121.3
+uvicorn==0.38.0
+python-multipart==0.0.20
+pydantic==2.12.4
+
+# Frontend Web UI
+Flask==3.1.2
+Werkzeug==3.1.3
+requests==2.32.5
+
+# Vector Database & Embeddings
+chromadb==1.3.5
+sentence-transformers==5.1.2
+
+# LLM Integration
+google-genai>=1.57.0
+
+# ML/AI Libraries
+torch==2.9.1
+transformers==4.57.1
+numpy==2.3.5
+
+# PDF Processing
+PyMuPDF==1.26.6
+
+# Voice Features
+SpeechRecognition==3.14.4
+gTTS==2.5.4
+pydub==0.25.1
+
+# Utilities
+python-dotenv==1.2.1
+pyOpenSSL==25.3.0
+
+# Testing
+pytest==8.3.4
+
+# Optional - needed for using download_models.py
+einops
+
+# Hybrid Search - BM25 keyword retrieval
+rank-bm25==0.2.2
+tiktoken>=0.7.0

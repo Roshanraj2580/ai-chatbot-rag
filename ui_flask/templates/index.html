@@ -1,0 +1,146 @@
+{% extends "base.html" %} {% block title %}Home - AI RAG Chatbot{% endblock 
+%} {% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-10">
+    <div class="text-center mb-5">
+      <h1 class="display-4 mb-3">
+        AI RAG Chatbot
+      </h1>
+      <p class="lead text-muted">
+       AI-powered document assistant built with Gemini 2.5 Flash, Gemini Embeddings, ChromaDB, and FastAPI.
+      </p>
+    </div>
+
+    <!-- Feature Cards -->
+    <div class="row g-4 mb-5">
+      <!-- Chat Feature -->
+      <div class="col-md-6 col-lg-3">
+        <div class="card h-100 text-center hover-card">
+          <div class="card-body">
+            <i class="fas fa-comments fa-3x text-primary mb-3"></i>
+            <h5 class="card-title">Text Chat</h5>
+            <p class="card-text">
+              Ask questions and get AI-powered answers grounded in your
+              documents.
+            </p>
+            <a href="/chat" class="btn btn-primary">Start Chatting</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Voice Chat Feature -->
+      <div class="col-md-6 col-lg-3">
+        <div class="card h-100 text-center hover-card">
+          <div class="card-body">
+            <i class="fas fa-microphone fa-3x text-success mb-3"></i>
+            <h5 class="card-title">Voice Chat</h5>
+            <p class="card-text">
+              Speak your questions and hear AI responses with natural voice
+              interaction
+            </p>
+            <a href="/voice" class="btn btn-success">Try Voice Chat</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Upload Feature -->
+      <div class="col-md-6 col-lg-3">
+        <div class="card h-100 text-center hover-card">
+          <div class="card-body">
+            <i class="fas fa-upload fa-3x text-warning mb-3"></i>
+            <h5 class="card-title">Upload Documents</h5>
+            <p class="card-text">
+             Upload PDF documents to build an intelligent AI knowledge base
+            </p>
+            <a href="/upload" class="btn btn-warning">Upload PDFs</a>
+          </div>
+        </div>
+      </div>
+
+      <!-- Documents Feature -->
+      <div class="col-md-6 col-lg-3">
+        <div class="card h-100 text-center hover-card">
+          <div class="card-body">
+            <i class="fas fa-folder-open fa-3x text-info mb-3"></i>
+            <h5 class="card-title">Document Library</h5>
+            <p class="card-text">
+              View, organize, and manage your uploaded document collection.
+            </p>
+            <a href="/documents" class="btn btn-info">View Library</a>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Key Features -->
+    <div class="card mb-4">
+      <div class="card-header bg-dark text-white">
+        <h5 class="mb-0"><i class="fas fa-star"></i> Key Features</h5>
+      </div>
+      <div class="card-body">
+        <div class="row">
+          <div class="col-md-6">
+            <ul class="list-unstyled">
+              <li class="mb-2">
+                <i class="fas fa-check-circle text-success"></i>
+                <strong>Gemini Embeddings:</strong> Cloud-powered semantic embeddings using Gemini
+              </li>
+              <li class="mb-2">
+                <i class="fas fa-check-circle text-success"></i>
+                <strong>Vector Search:</strong>  Lightning-fast semantic retrieval powered by ChromaDB.
+              </li>
+              <li class="mb-2">
+                <i class="fas fa-check-circle text-success"></i>
+                <strong>Gemini AI:</strong> Gemini 2.5 Flash for accurate document understanding
+              </li>
+            </ul>
+          </div>
+          <div class="col-md-6">
+            <ul class="list-unstyled">
+              <li class="mb-2">
+                <i class="fas fa-check-circle text-success"></i>
+                <strong>Voice Interface:</strong> Speech-to-text and
+                text-to-speech
+              </li>
+              <li class="mb-2">
+                <i class="fas fa-check-circle text-success"></i>
+                <strong>Citations:</strong> Every answer includes source
+                references
+              </li>
+              <li class="mb-2">
+                <i class="fas fa-check-circle text-success"></i>
+                <strong>Secure Processing:</strong> Documents are processed securely using Gemini APIs.
+              </li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Getting Started -->
+    <div class="card">
+      <div class="card-header bg-primary text-white">
+        <h5 class="mb-0"><i class="fas fa-rocket"></i> Getting Started</h5>
+      </div>
+      <div class="card-body">
+        <ol>
+          <li class="mb-2">
+            <strong>Upload Documents:</strong> Go to the Upload page and add
+            your PDF files
+          </li>
+          <li class="mb-2">
+            <strong>Wait for Processing:</strong> Your PDFs are indexed using Gemini Embeddings.
+          </li>
+          <li class="mb-2">
+            <strong>Start Asking:</strong> Use text or voice chat to ask
+            questions about your documents
+          </li>
+          <li class="mb-2">
+            <strong>Get Answers:</strong> Receive grounded AI responses with document citations.
+          </li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,266 @@
+{% extends "base.html" %} {% block title %}Voice Chat - AI RAG Chatbot{%
+endblock %} {% block content %}
+<div class="row">
+  <div class="col-lg-8 mx-auto">
+    <div class="card shadow">
+      <div class="card-header bg-success text-white">
+        <h4 class="mb-0">
+          <i class="fas fa-microphone-alt"></i> Real-Time Voice Conversation
+        </h4>
+        <small
+          >Speak naturally - the AI will respond with voice using your
+          documents</small
+        >
+      </div>
+      <div class="card-body">
+        <!-- Conversation Status -->
+        <div class="text-center mb-4">
+          <div class="status-indicator" id="statusIndicator">
+            <div class="status-icon" id="statusIcon">
+              <i class="fas fa-circle text-secondary"></i>
+            </div>
+            <div class="status-text" id="statusText">
+              Ready to start conversation
+            </div>
+          </div>
+        </div>
+
+        <!-- Voice Control Button -->
+        <div class="text-center mb-4">
+          <button
+            id="voiceButton"
+            class="btn btn-success btn-lg rounded-circle voice-button"
+            onclick="toggleVoiceConversation()"
+            style="width: 120px; height: 120px; position: relative"
+          >
+            <i id="voiceIcon" class="fas fa-microphone fa-3x"></i>
+            <div id="pulseRing" class="pulse-ring" style="display: none"></div>
+          </button>
+          <div class="mt-3">
+            <div id="voiceStatus" class="badge bg-secondary fs-6">
+              Press to Start
+            </div>
+          </div>
+          <div class="mt-2">
+            <small class="text-muted" id="voiceHint"
+              >Click the microphone to start speaking</small
+            >
+          </div>
+        </div>
+
+        <!-- Audio Waveform Visualizer -->
+        <div id="waveformContainer" class="mb-4" style="display: none">
+          <canvas id="waveformCanvas" width="100%" height="80"></canvas>
+        </div>
+
+        <!-- Conversation Display -->
+        <div class="card">
+          <div class="card-header bg-light">
+            <div class="d-flex justify-content-between align-items-center">
+              <h6 class="mb-0"><i class="fas fa-comments"></i> Conversation</h6>
+              <button
+                class="btn btn-sm btn-outline-secondary"
+                onclick="clearConversation()"
+              >
+                <i class="fas fa-trash"></i> Clear
+              </button>
+            </div>
+          </div>
+          <div class="card-body">
+            <div id="conversationDisplay" class="conversation-display">
+              <div class="text-center text-muted">
+                <i class="fas fa-comment-dots fa-2x mb-2"></i>
+                <p>Your conversation will appear here</p>
+                <small
+                  >The AI will respond to your questions using your uploaded
+                  documents</small
+                >
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Instructions -->
+        <div class="alert alert-info mt-4">
+          <h6><i class="fas fa-info-circle"></i> How to use:</h6>
+          <ol class="mb-0 small">
+            <li>
+              <strong>Click the microphone</strong> button to start recording
+            </li>
+            <li>
+              <strong>Speak your question</strong> clearly about your documents
+            </li>
+            <li><strong>Click again to stop</strong> and send your question</li>
+            <li>
+              <strong>Wait for AI response</strong> - it will speak the answer
+              back to you
+            </li>
+            <li><strong>Repeat</strong> to continue the conversation</li>
+          </ol>
+        </div>
+
+        <!-- Requirements Notice -->
+        <div class="alert alert-warning mt-3">
+          <small>
+            <strong>Requirements:</strong> Microphone access, modern browser
+            (Chrome/Firefox/Edge recommended), and documents uploaded to the
+            system.
+          </small>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Audio Player (hidden) -->
+<audio id="responseAudio" style="display: none"></audio>
+
+<style>
+  .voice-button {
+    transition: all 0.3s ease;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  }
+
+  .voice-button:hover {
+    transform: scale(1.05);
+    box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15);
+  }
+
+  .voice-button.recording {
+    background-color: #dc3545 !important;
+    border-color: #dc3545 !important;
+    animation: pulse-button 1.5s infinite;
+  }
+
+  @keyframes pulse-button {
+    0% {
+      box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.7);
+    }
+    70% {
+      box-shadow: 0 0 0 20px rgba(220, 53, 69, 0);
+    }
+    100% {
+      box-shadow: 0 0 0 0 rgba(220, 53, 69, 0);
+    }
+  }
+
+  .pulse-ring {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 100%;
+    height: 100%;
+    border: 3px solid #dc3545;
+    border-radius: 50%;
+    animation: pulse-ring 1.5s infinite;
+  }
+
+  @keyframes pulse-ring {
+    0% {
+      transform: translate(-50%, -50%) scale(1);
+      opacity: 1;
+    }
+    100% {
+      transform: translate(-50%, -50%) scale(1.3);
+      opacity: 0;
+    }
+  }
+
+  .status-indicator {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .status-icon {
+    font-size: 2rem;
+  }
+
+  .status-icon.listening {
+    color: #ffc107;
+    animation: blink 1s infinite;
+  }
+
+  .status-icon.processing {
+    color: #0dcaf0;
+  }
+
+  .status-icon.speaking {
+    color: #198754;
+    animation: blink 0.8s infinite;
+  }
+
+  @keyframes blink {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.3;
+    }
+  }
+
+  .conversation-display {
+    min-height: 300px;
+    max-height: 500px;
+    overflow-y: auto;
+    padding: 15px;
+  }
+
+  .conversation-turn {
+    margin-bottom: 20px;
+    padding: 12px;
+    border-radius: 8px;
+    background-color: #f8f9fa;
+    animation: fadeIn 0.3s;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(10px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+
+  .conversation-turn.user {
+    background-color: #e3f2fd;
+    border-left: 4px solid #2196f3;
+  }
+
+  .conversation-turn.assistant {
+    background-color: #e8f5e9;
+    border-left: 4px solid #4caf50;
+  }
+
+  .turn-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+
+  .turn-content {
+    margin-left: 28px;
+  }
+
+  .turn-audio {
+    margin-top: 8px;
+    margin-left: 28px;
+  }
+
+  #waveformCanvas {
+    width: 100%;
+    background-color: #f8f9fa;
+    border-radius: 8px;
+  }
+</style>
+{% endblock %} {% block extra_js %}
+<script src="{{ url_for('static', filename='js/voice_realtime.js') }}"></script>
+{% endblock %}

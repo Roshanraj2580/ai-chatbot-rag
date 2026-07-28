@@ -1,0 +1,7 @@
+.venv
+__pycache__
+.git
+.gitignore
+chroma_data
+temp_uploads
+*.pyc
