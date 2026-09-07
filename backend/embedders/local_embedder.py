@@ -9,7 +9,7 @@ from sentence_transformers import SentenceTransformer
 from backend.interfaces.embedder import (
     EmbedderInterface,
     EMBEDDING_DIMENSION,
-    EmbeddingError
+    EmbeddingError 
 )
 
 
