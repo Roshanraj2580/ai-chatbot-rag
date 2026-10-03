@@ -35,8 +35,9 @@ jobs:
       - name: Run Unit Tests
         env:
           GOOGLE_API_KEY: "dummy-key-for-unit-tests"
+          EMBEDDING_PROVIDER: "gemini"
         run: |
-          python -m pytest backend/tests/ -v -m "not slow and not integration" || true
+          python -m pytest backend/tests/ -v -m "not slow and not integration"
 
   docker:
     name: Docker Build Validation

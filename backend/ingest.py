@@ -311,7 +311,7 @@ class PDFIngestor:
             for start in range(0, len(chunks), BATCH_SIZE):
                 batch_chunks = chunks[start:start + BATCH_SIZE]
                 batch_embeddings = retry_with_backoff(
-                    lambda: self.embedder.encode(batch_chunks, batch_size=8),
+                    lambda b=batch_chunks: self.embedder.encode(b, batch_size=8),
                     max_retries=3,
                     initial_delay=1.0
                 )
@@ -340,7 +340,6 @@ class PDFIngestor:
                 del embeddings_list
                 del batch_ids
                 del batch_metadatas
-                del batch_chunks
                 gc.collect()
             # Free this page's memory before moving to the next page
             chunks.clear()
