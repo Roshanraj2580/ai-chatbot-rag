@@ -222,7 +222,7 @@ class PDFIngestor:
         self.embedder = get_embedder()
         self.chroma_client = get_chroma_client()
         self.markdown_converter = MarkdownConverter()
-        self.chunker = None  # Lazy initialized on first use
+        self.chunker = TextChunker()
 
     def extract_pdf_text(self, pdf_path: str, failed_pages: List[int]) -> Generator[Tuple[int, str], None, None]:
         """
@@ -338,8 +338,6 @@ class PDFIngestor:
                 total_stored += len(batch_ids)
                 del batch_embeddings
                 del embeddings_list
-                batch_metadatas.clear()
-                batch_ids.clear()
                 del batch_ids
                 del batch_metadatas
                 del batch_chunks

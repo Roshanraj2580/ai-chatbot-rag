@@ -82,6 +82,7 @@ class DocumentInfo(BaseModel):
 class QueryRequest(BaseModel):
     """Request model for query endpoint."""
     query: str = Field(..., min_length=1, description="User question")
+    filter_doc: Optional[str] = Field(None, description="Optional document filename to scope query")
 
 
 class Citation(BaseModel):
@@ -104,6 +105,10 @@ class QueryResponse(BaseModel):
     answer: str = Field(..., description="Generated answer")
     citations: List[Citation] = Field(default_factory=list, description="Source citations")
     retrieved_chunks: List[RetrievedChunk] = Field(default_factory=list, description="Retrieved context chunks")
+    tokens: Optional[int] = 0
+    cost_usd: Optional[float] = 0.0
+    from_cache: Optional[bool] = False
+    target_doc: Optional[str] = ""
 
 
 @asynccontextmanager
@@ -315,7 +320,8 @@ async def list_documents():
         List of DocumentInfo objects
     """
     try:
-        results = chroma_client.get_all_documents()
+        chroma = chroma_client or get_chroma_client()
+        results = chroma.get_all_documents()
 
         # Aggregate by doc_id
         doc_map = {}
@@ -366,7 +372,8 @@ async def get_document(doc_id: str):
         DocumentInfo object
     """
     try:
-        results = chroma_client.get_documents_by_doc_id(doc_id)
+        chroma = chroma_client or get_chroma_client()
+        results = chroma.get_documents_by_doc_id(doc_id)
 
         if not results["metadatas"]:
             raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
@@ -408,14 +415,15 @@ async def delete_document(doc_id: str):
         JSON with status and count of deleted chunks
     """
     try:
+        chroma = chroma_client or get_chroma_client()
         # Check if document exists first
-        results = chroma_client.get_documents_by_doc_id(doc_id)
+        results = chroma.get_documents_by_doc_id(doc_id)
 
         if not results["metadatas"]:
             raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
         # Delete the document
-        count = chroma_client.delete_document(doc_id)
+        count = chroma.delete_document(doc_id)
         
         # Invalidate query cache
         get_cache().clear()
@@ -435,59 +443,54 @@ async def delete_document(doc_id: str):
 
 
 @app.get("/ask", response_model=QueryResponse)
-async def ask_query_get(query: str = Query(..., description="User question", min_length=1)):
+async def ask_query_get(
+    query: str = Query(..., description="User question", min_length=1),
+    filter_doc: Optional[str] = Query(None, description="Filter search to specific document")
+):
     """
     Query endpoint (GET method).
-    
-    Args:
-        query: User question as query parameter
-    
-    Returns:
-        QueryResponse with answer, citations, and retrieved chunks
     """
-    return await _process_query(query)
+    return await _process_query(query, filter_doc=filter_doc)
 
 
 @app.post("/ask", response_model=QueryResponse)
 async def ask_query_post(request: QueryRequest):
     """
     Query endpoint (POST method).
-    
-    Args:
-        request: QueryRequest with query field
-    
-    Returns:
-        QueryResponse with answer, citations, and retrieved chunks
     """
-    return await _process_query(request.query)
+    return await _process_query(request.query, filter_doc=request.filter_doc)
 
 
-async def _process_query(query: str) -> QueryResponse:
+async def _process_query(query: str, filter_doc: Optional[str] = None) -> QueryResponse:
     """
     Internal query processing logic.
-    
-    Args:
-        query: User question
-    
-    Returns:
-        QueryResponse
     """
     try:
+        chroma = chroma_client or get_chroma_client()
         # Check if database has any documents
-        if chroma_client.count() == 0:
+        if chroma.count() == 0:
             return QueryResponse(
                 answer="I don't know.",
                 citations=[],
-                retrieved_chunks=[]
+                retrieved_chunks=[],
+                tokens=0,
+                cost_usd=0.0,
+                from_cache=False,
+                target_doc=filter_doc or ""
             )
 
-        # Process query
-        result = query_service.answer_query(query, k=5)
+        # Process query with document filter
+        qs = query_service or get_query_service()
+        result = qs.answer_query(query, k=5, filter_doc=filter_doc)
 
         return QueryResponse(
             answer=result["answer"],
             citations=[Citation(**c) for c in result["citations"]],
-            retrieved_chunks=[RetrievedChunk(**c) for c in result["retrieved_chunks"]]
+            retrieved_chunks=[RetrievedChunk(**c) for c in result["retrieved_chunks"]],
+            tokens=result.get("tokens", 0),
+            cost_usd=result.get("cost_usd", 0.0),
+            from_cache=result.get("from_cache", False),
+            target_doc=result.get("target_doc", "")
         )
 
     except RuntimeError as e:
@@ -510,9 +513,10 @@ async def get_cache_stats():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
+    chroma = chroma_client or get_chroma_client()
     return {
         "status": "ok",
-        "chroma_count": chroma_client.count() if chroma_client else 0,
+        "chroma_count": chroma.count() if chroma else 0,
         "timestamp": datetime.now().isoformat()
     }
 
@@ -569,10 +573,12 @@ async def voice_conversation(
         # Define RAG callback
         async def rag_callback(user_text: str) -> str:
             """Query RAG system with user's question."""
-            if chroma_client.count() == 0:
+            chroma = chroma_client or get_chroma_client()
+            if chroma.count() == 0:
                 return "I don't have any documents to answer from. Please upload some documents first."
 
-            result = query_service.answer_query(user_text, k=5)
+            qs = query_service or get_query_service()
+            result = qs.answer_query(user_text, k=5)
             return result["answer"]
 
         # Process conversation turn

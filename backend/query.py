@@ -189,20 +189,17 @@ class QueryService:
             f"retrieval_mode={self.retriever.mode}, cache={self.cache.backend_type}"
         )
     
-    def answer_query(self, query: str, k: Optional[int] = None) -> Dict[str, Any]:
+    def answer_query(self, query: str, k: Optional[int] = None, filter_doc: Optional[str] = None) -> Dict[str, Any]:
         """
         Complete query pipeline: hybrid retrieve → deduplicate → prompt → LLM.
         
         Args:
             query: User question
             k: Number of chunks to retrieve (default: RETRIEVAL_K env var or 5)
+            filter_doc: Optional source_filename to scope search to a specific document
         
         Returns:
-            Dict with keys:
-                - answer (str): Generated answer text
-                - citations (List[Dict]): Source citations
-                - retrieved_chunks (List[Dict]): Raw retrieved chunks
-                - search_stats (Dict): Search statistics for UI display
+            Dict with answer, citations, chunks, token usage, and cost estimates.
         """
         # Use default k if not specified
         if k is None:
@@ -219,25 +216,38 @@ class QueryService:
         query = query.strip()  # Normalize whitespace
 
         # 1. Fast Cache Check (Redis / In-Memory): drops latency from ~1500ms to <5ms
-        cached_result = self.cache.get(query, k=k)
+        cache_query_id = f"{query}:doc={filter_doc or 'all'}"
+        cached_result = self.cache.get(cache_query_id, k=k)
         if cached_result:
             logger.info(f"⚡ Cache HIT for query: '{query[:50]}' (served in <5ms)")
             return cached_result
 
-        logger.info(f"Processing query (Cache MISS): {query[:100]}...")
+        logger.info(f"Processing query (Cache MISS): '{query[:80]}...', filter_doc={filter_doc}")
         
         # Use HybridRetriever with stats (handles semantic, keyword, or hybrid)
-        # Fetch extra to account for duplicates that will be filtered
-        fetch_k = min(k * 2, 50)
+        fetch_k = min(k * 4, 60) if filter_doc else min(k * 2, 50)
         retrieved_chunks, search_stats = self.retriever.search_with_stats(query, k=fetch_k)
         
+        # Apply document filter if scoped to a specific document
+        if filter_doc:
+            target = filter_doc.strip().lower()
+            retrieved_chunks = [
+                c for c in retrieved_chunks
+                if c.get("metadata", {}).get("source_filename", "").lower() == target
+                or c.get("metadata", {}).get("doc_id", "") == target
+            ]
+
         if not retrieved_chunks:
-            logger.warning("No results found in vector DB")
+            logger.warning("No matching results found in vector DB")
+            no_doc_msg = f"No relevant content found in '{filter_doc}'." if filter_doc else "I don't have any documents to answer from. Please upload some documents first."
             return {
-                "answer": "I don't have any documents to answer from. Please upload some documents first.",
+                "answer": no_doc_msg,
                 "citations": [],
                 "retrieved_chunks": [],
-                "search_stats": search_stats
+                "search_stats": search_stats,
+                "tokens": 0,
+                "cost_usd": 0.0,
+                "target_doc": filter_doc or ""
             }
         
         # Deduplicate chunks
@@ -310,16 +320,25 @@ class QueryService:
                 "chunk_index": metadata.get("chunk_index")
             })
         
+        # Estimate token usage and API cost (Gemini 3.8 Flash pricing: $0.075/1M input, $0.30/1M output)
+        prompt_tokens = max(1, len(prompt) // 4)
+        completion_tokens = max(1, len(answer) // 4)
+        total_tokens = prompt_tokens + completion_tokens
+        cost_usd = round((prompt_tokens * 0.000000075) + (completion_tokens * 0.0000003), 6)
+
         result = {
             "answer": answer,
             "citations": citations,
             "retrieved_chunks": unique_chunks,
             "search_stats": search_stats,
-            "from_cache": False
+            "from_cache": False,
+            "tokens": total_tokens,
+            "cost_usd": cost_usd,
+            "target_doc": filter_doc or ""
         }
         
         # Store in Redis/memory cache
-        self.cache.set(query, result, k=k)
+        self.cache.set(cache_query_id, result, k=k)
         
         return result
 

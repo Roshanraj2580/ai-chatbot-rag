@@ -3,15 +3,18 @@
 <div class="row">
   <div class="col-lg-8 mx-auto">
     <div class="card shadow">
-      <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+      <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
         <h4 class="mb-0">
-          <i class="fas fa-comments"></i> Chat with Your Documents
+          <i class="fas fa-comments me-1"></i> Chat with Your Documents
         </h4>
-        <div>
+        <div class="d-flex align-items-center flex-wrap gap-2">
+          <select id="docFilterSelect" class="form-select form-select-sm bg-light text-dark border-0" style="width: auto; max-width: 200px;" title="Filter query to a specific document">
+            <option value="">📁 All Documents</option>
+          </select>
           <span id="retrievalModeBadge" class="badge bg-light text-dark">
             <i class="fas fa-spinner fa-spin"></i> Loading...
           </span>
-          <button class="btn btn-sm btn-outline-light ms-2" onclick="clearChatHistory()" title="Clear chat history">
+          <button class="btn btn-sm btn-outline-light" onclick="clearChatHistory()" title="Clear chat history">
             <i class="fas fa-trash-alt"></i> Clear
           </button>
         </div>
@@ -99,6 +102,29 @@ fetch('/api/config')
     if (badge) badge.textContent = 'Mode: Hybrid';
   });
 
+// Populate document filter dropdown
+function loadDocumentsFilter() {
+  fetch('/api/documents')
+    .then(res => res.json())
+    .then(docs => {
+      const select = document.getElementById('docFilterSelect');
+      if (!select || !Array.isArray(docs)) return;
+      
+      const currentVal = select.value;
+      select.innerHTML = '<option value="">📁 All Documents</option>';
+      docs.forEach(doc => {
+        const opt = document.createElement('option');
+        opt.value = doc.source_filename;
+        opt.textContent = `📄 ${doc.source_filename}`;
+        if (doc.source_filename === currentVal) {
+          opt.selected = true;
+        }
+        select.appendChild(opt);
+      });
+    })
+    .catch(() => {});
+}
+
 // Handle enter key in input
 function handleKeyPress(e) {
   if (e.key === 'Enter') {
@@ -124,7 +150,7 @@ function appendUserMessage(text) {
   container.scrollTop = container.scrollHeight;
 }
 
-// Append Assistant Message Bubble with MLOps Latency and Feedback
+// Append Assistant Message Bubble with MLOps Latency, Feedback, Tokens, Cost, and Copy
 function appendBotMessage(data, isHistory = false) {
   const emptyNotice = document.getElementById('emptyChatNotice');
   if (emptyNotice) emptyNotice.style.display = 'none';
@@ -149,30 +175,56 @@ function appendBotMessage(data, isHistory = false) {
   const logId = data.log_id || data.id;
   const latency = data.latency_ms ? `${Math.round(data.latency_ms)} ms` : '';
   const feedback = data.feedback || 0;
+  const isCached = data.from_cache || (data.latency_ms && data.latency_ms < 25);
+  const tokens = data.tokens || 0;
+  const cost = data.cost_usd || 0.0;
+  const targetDoc = data.target_doc || '';
 
-  let feedbackHtml = '';
-  if (logId) {
-    feedbackHtml = `
-      <div class="d-flex align-items-center mt-2 pt-1 border-top">
-        ${latency ? `<span class="badge bg-light text-dark border me-2"><i class="fas fa-stopwatch text-primary me-1"></i>${latency}</span>` : ''}
-        <small class="text-muted me-2">Was this helpful?</small>
-        <button class="btn btn-sm btn-outline-success py-0 px-2 me-1 ${feedback === 1 ? 'active' : ''}" 
-                onclick="sendFeedback(${logId}, 1, this)" title="Helpful">
-          <i class="fas fa-thumbs-up"></i>
-        </button>
-        <button class="btn btn-sm btn-outline-danger py-0 px-2 ${feedback === -1 ? 'active' : ''}" 
-                onclick="sendFeedback(${logId}, -1, this)" title="Not helpful">
-          <i class="fas fa-thumbs-down"></i>
+  let telemetryBadges = '';
+  if (isCached) {
+    telemetryBadges += `<span class="badge bg-warning text-dark me-1" title="Served from Redis Cache in <5ms"><i class="fas fa-bolt"></i> Cached</span>`;
+  }
+  if (latency) {
+    telemetryBadges += `<span class="badge bg-light text-dark border me-1"><i class="fas fa-stopwatch text-primary me-1"></i>${latency}</span>`;
+  }
+  if (tokens > 0) {
+    telemetryBadges += `<span class="badge bg-light text-dark border me-1" title="Estimated Tokens"><i class="fas fa-calculator text-secondary me-1"></i>${tokens} tok</span>`;
+  }
+  if (cost > 0) {
+    telemetryBadges += `<span class="badge bg-light text-dark border me-1" title="Estimated Cost"><i class="fas fa-coins text-success me-1"></i>$${Number(cost).toFixed(5)}</span>`;
+  }
+  if (targetDoc) {
+    telemetryBadges += `<span class="badge bg-light text-info border me-1" title="Filtered to document"><i class="fas fa-filter me-1"></i>${escapeHtml(targetDoc)}</span>`;
+  }
+
+  const actionsHtml = `
+    <div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mt-2 pt-2 border-top">
+      <div class="d-flex align-items-center flex-wrap gap-1">
+        ${telemetryBadges}
+      </div>
+      <div class="d-flex align-items-center gap-1">
+        ${logId ? `
+          <button class="btn btn-sm btn-outline-success py-0 px-2 ${feedback === 1 ? 'active' : ''}" 
+                  onclick="sendFeedback(${logId}, 1, this)" title="Helpful">
+            <i class="fas fa-thumbs-up"></i>
+          </button>
+          <button class="btn btn-sm btn-outline-danger py-0 px-2 ${feedback === -1 ? 'active' : ''}" 
+                  onclick="sendFeedback(${logId}, -1, this)" title="Not helpful">
+            <i class="fas fa-thumbs-down"></i>
+          </button>
+        ` : ''}
+        <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="copyMessage(this)" title="Copy answer to clipboard">
+          <i class="far fa-copy me-1"></i>Copy
         </button>
       </div>
-    `;
-  }
+    </div>
+  `;
 
   msgDiv.innerHTML = `
     <div class="message-bubble">
-      <div>${escapeHtml(data.answer || data.bot_answer || '')}</div>
+      <div class="bot-answer-text">${escapeHtml(data.answer || data.bot_answer || '')}</div>
       ${citationsHtml}
-      ${feedbackHtml}
+      ${actionsHtml}
     </div>
     <div class="message-timestamp">${data.timestamp || 'Just now'}</div>
   `;
@@ -180,11 +232,51 @@ function appendBotMessage(data, isHistory = false) {
   container.scrollTop = container.scrollHeight;
 }
 
+// Copy answer text to clipboard
+function copyMessage(btn) {
+  const bubble = btn.closest('.message-bubble');
+  const textDiv = bubble ? bubble.querySelector('.bot-answer-text') : null;
+  const textToCopy = textDiv ? textDiv.innerText : '';
+  
+  if (!textToCopy) return;
+
+  const originalHtml = btn.innerHTML;
+  function showSuccess() {
+    btn.innerHTML = '<i class="fas fa-check text-success me-1"></i>Copied!';
+    btn.classList.add('border-success');
+    setTimeout(() => {
+      btn.innerHTML = originalHtml;
+      btn.classList.remove('border-success');
+    }, 2000);
+  }
+
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(textToCopy).then(showSuccess).catch(() => fallbackCopy(textToCopy, showSuccess));
+  } else {
+    fallbackCopy(textToCopy, showSuccess);
+  }
+}
+
+function fallbackCopy(text, callback) {
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  document.body.appendChild(textarea);
+  textarea.select();
+  try {
+    document.execCommand('copy');
+    callback();
+  } catch (e) {}
+  document.body.removeChild(textarea);
+}
+
 // Send user question to /api/ask
 function sendMessage() {
   const input = document.getElementById('messageInput');
   const query = input.value.trim();
   if (!query) return;
+
+  const docFilterSelect = document.getElementById('docFilterSelect');
+  const filterDoc = docFilterSelect ? docFilterSelect.value : '';
 
   // Add user bubble
   appendUserMessage(query);
@@ -196,7 +288,7 @@ function sendMessage() {
   fetch('/api/ask', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query: query })
+    body: JSON.stringify({ query: query, filter_doc: filterDoc })
   })
   .then(res => res.json())
   .then(data => {
@@ -287,6 +379,9 @@ function loadChatHistory() {
             citations: item.citations,
             latency_ms: item.latency_ms,
             feedback: item.feedback,
+            tokens: item.tokens,
+            cost_usd: item.cost_usd,
+            target_doc: item.target_doc,
             timestamp: item.timestamp
           }, true);
         });
@@ -302,7 +397,10 @@ function escapeHtml(text) {
   return div.innerHTML;
 }
 
-// Execute history load
-document.addEventListener('DOMContentLoaded', loadChatHistory);
+// Execute history and document filter dropdown load
+document.addEventListener('DOMContentLoaded', () => {
+  loadDocumentsFilter();
+  loadChatHistory();
+});
 </script>
 {% endblock %}

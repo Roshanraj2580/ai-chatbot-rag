@@ -27,12 +27,12 @@ def test_create_auto_success():
 
 def test_create_auto_no_key_fallback():
     # If GOOGLE_API_KEY missing, GeminiEmbedder raises ValueError, factory catches and returns Local
-    if "GOOGLE_API_KEY" in os.environ:
-        del os.environ["GOOGLE_API_KEY"]
-    
-    with patch("backend.embedders.local_embedder.os.path.exists", return_value=True):
-        embedder = create_embedder("auto")
-        assert isinstance(embedder, LocalEmbedder)
+    env = os.environ.copy()
+    env.pop("GOOGLE_API_KEY", None)
+    with patch.dict(os.environ, env, clear=True):
+        with patch("backend.embedders.local_embedder.os.path.exists", return_value=True):
+            embedder = create_embedder("auto")
+            assert isinstance(embedder, LocalEmbedder)
 
 def test_unknown_provider():
     with pytest.raises(ValueError, match="Unknown embedding provider"):

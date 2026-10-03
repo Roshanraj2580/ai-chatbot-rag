@@ -46,11 +46,24 @@ def init_db():
                 citations TEXT,
                 retrieved_chunks_count INTEGER DEFAULT 0,
                 latency_ms REAL DEFAULT 0.0,
-                feedback INTEGER DEFAULT 0, -- 1: positive (thumbs up), -1: negative (thumbs down), 0: unrated
+                feedback INTEGER DEFAULT 0, -- 1: positive, -1: negative, 0: unrated
+                tokens INTEGER DEFAULT 0,
+                cost_usd REAL DEFAULT 0.0,
+                target_doc TEXT DEFAULT '',
                 timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 FOREIGN KEY (user_id) REFERENCES users(id)
             )
         """)
+        
+        # Ensure migration columns exist for existing databases
+        cursor.execute("PRAGMA table_info(chat_logs)")
+        existing_cols = [row[1] for row in cursor.fetchall()]
+        if "tokens" not in existing_cols:
+            cursor.execute("ALTER TABLE chat_logs ADD COLUMN tokens INTEGER DEFAULT 0")
+        if "cost_usd" not in existing_cols:
+            cursor.execute("ALTER TABLE chat_logs ADD COLUMN cost_usd REAL DEFAULT 0.0")
+        if "target_doc" not in existing_cols:
+            cursor.execute("ALTER TABLE chat_logs ADD COLUMN target_doc TEXT DEFAULT ''")
         
         conn.commit()
 
@@ -127,17 +140,18 @@ def get_user_by_id(user_id):
 # Chat History & MLOps Query Logging Helpers
 # ============================================================================
 
-def log_chat_interaction(user_id, username, query, answer, citations, chunks_count, latency_ms):
-    """Log an entire Q&A interaction with MLOps telemetry."""
+def log_chat_interaction(user_id, username, query, answer, citations, chunks_count, latency_ms, tokens=0, cost_usd=0.0, target_doc=""):
+    """Log an entire Q&A interaction with MLOps telemetry, token usage, and financial cost."""
     citations_json = json.dumps(citations) if citations else "[]"
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO chat_logs (
                 user_id, username, user_query, bot_answer, 
-                citations, retrieved_chunks_count, latency_ms, feedback
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0)
-        """, (user_id, username, query, answer, citations_json, chunks_count, latency_ms))
+                citations, retrieved_chunks_count, latency_ms, feedback,
+                tokens, cost_usd, target_doc
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+        """, (user_id, username, query, answer, citations_json, chunks_count, latency_ms, tokens, cost_usd, target_doc))
         conn.commit()
         return cursor.lastrowid
 
@@ -147,7 +161,8 @@ def get_user_chat_history(user_id, limit=50):
     with get_db_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            SELECT id, user_query, bot_answer, citations, retrieved_chunks_count, latency_ms, feedback, timestamp
+            SELECT id, user_query, bot_answer, citations, retrieved_chunks_count, latency_ms, feedback,
+                   tokens, cost_usd, target_doc, timestamp
             FROM chat_logs
             WHERE user_id = ?
             ORDER BY id ASC
@@ -170,6 +185,9 @@ def get_user_chat_history(user_id, limit=50):
                 "retrieved_chunks_count": row["retrieved_chunks_count"],
                 "latency_ms": round(row["latency_ms"], 2),
                 "feedback": row["feedback"],
+                "tokens": row["tokens"] or 0,
+                "cost_usd": round(row["cost_usd"] or 0.0, 5),
+                "target_doc": row["target_doc"] or "",
                 "timestamp": row["timestamp"]
             })
         return history
@@ -229,10 +247,17 @@ def get_mlops_metrics():
         cursor.execute("SELECT AVG(retrieved_chunks_count) FROM chat_logs")
         avg_chunks_row = cursor.fetchone()[0]
         avg_chunks = round(avg_chunks_row, 1) if avg_chunks_row else 0.0
+
+        # Total tokens & estimated cost
+        cursor.execute("SELECT SUM(tokens), SUM(cost_usd) FROM chat_logs")
+        tokens_cost_row = cursor.fetchone()
+        total_tokens = tokens_cost_row[0] or 0
+        total_cost_usd = round(tokens_cost_row[1] or 0.0, 5)
         
         # Recent queries (latest 25)
         cursor.execute("""
-            SELECT id, username, user_query, bot_answer, retrieved_chunks_count, latency_ms, feedback, timestamp
+            SELECT id, username, user_query, bot_answer, retrieved_chunks_count, latency_ms, feedback,
+                   tokens, cost_usd, target_doc, timestamp
             FROM chat_logs
             ORDER BY id DESC
             LIMIT 25
@@ -246,5 +271,7 @@ def get_mlops_metrics():
             "positive_feedback": positive_feedback,
             "negative_feedback": negative_feedback,
             "satisfaction_rate": satisfaction_rate,
+            "total_tokens": total_tokens,
+            "total_cost_usd": total_cost_usd,
             "recent_logs": recent_logs
         }

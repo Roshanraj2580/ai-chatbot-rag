@@ -240,9 +240,15 @@ def ask():
     if not query:
         return jsonify({"error": "Query is required"}), 400
     
+    filter_doc = data.get("filter_doc")
+    
     # 1. Measure query latency (MLOps performance tracking)
     start_time = time.time()
-    result = call_backend("/ask", method="POST", json={"query": query})
+    payload = {"query": query}
+    if filter_doc:
+        payload["filter_doc"] = filter_doc
+        
+    result = call_backend("/ask", method="POST", json=payload)
     latency_ms = (time.time() - start_time) * 1000.0
     
     if isinstance(result, dict) and "error" in result:
@@ -251,6 +257,8 @@ def ask():
     answer = result.get("answer", "")
     citations = result.get("citations", [])
     chunks_count = len(result.get("retrieved_chunks", []))
+    tokens = result.get("tokens", 0)
+    cost_usd = result.get("cost_usd", 0.0)
     
     # 2. Log interaction into SQLite for Chat History & MLOps Telemetry
     log_id = log_chat_interaction(
@@ -260,12 +268,18 @@ def ask():
         answer=answer,
         citations=citations,
         chunks_count=chunks_count,
-        latency_ms=latency_ms
+        latency_ms=latency_ms,
+        tokens=tokens,
+        cost_usd=cost_usd,
+        target_doc=filter_doc or ""
     )
     
     # Attach telemetry metadata to response
     result["log_id"] = log_id
     result["latency_ms"] = round(latency_ms, 2)
+    result["tokens"] = tokens
+    result["cost_usd"] = cost_usd
+    result["target_doc"] = filter_doc or ""
     return jsonify(result)
 
 

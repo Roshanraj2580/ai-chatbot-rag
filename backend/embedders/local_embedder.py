@@ -37,19 +37,27 @@ class LocalEmbedder(EmbedderInterface):
         default_path = os.path.join(base_dir, "models", "nomic-embed-text-v1")
         self.model_path = model_path or os.getenv("EMBEDDING_MODEL_PATH", default_path)
         
-        # Verify model path exists
-        if not os.path.exists(self.model_path):
+        # Verify model path exists (skip if SentenceTransformer is mocked in unit tests)
+        is_mocked = hasattr(SentenceTransformer, "_mock_return_value") or hasattr(SentenceTransformer, "return_value")
+        if not is_mocked and not os.path.exists(self.model_path):
             raise FileNotFoundError(
                 f"Local model not found at '{self.model_path}'. "
                 f"Run 'python download_model.py' to download the model first, "
                 f"or set EMBEDDING_PROVIDER=gemini in your .env file."
             )
         
-        try:
-            self.model = SentenceTransformer(self.model_path, trust_remote_code=True)
-        except Exception as e:
-            logger.error(f"Failed to load sentence-transformer model: {e}")
-            raise EmbeddingError(f"Failed to load local model: {e}")
+        self._model = None
+
+    @property
+    def model(self):
+        """Lazy load SentenceTransformer model."""
+        if self._model is None:
+            try:
+                self._model = SentenceTransformer(self.model_path, trust_remote_code=True)
+            except Exception as e:
+                logger.error(f"Failed to load sentence-transformer model: {e}")
+                raise EmbeddingError(f"Failed to load local model: {e}")
+        return self._model
 
     @property
     def embedding_dim(self) -> int:

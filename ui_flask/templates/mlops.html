@@ -16,13 +16,13 @@
 
   <!-- Metric Cards -->
   <div class="row g-3 mb-4">
-    <div class="col-md-3">
-      <div class="card shadow-sm border-0 bg-primary text-white">
+    <div class="col-xl-2 col-md-4 col-sm-6">
+      <div class="card shadow-sm border-0 bg-primary text-white h-100">
         <div class="card-body">
           <div class="d-flex justify-content-between align-items-center">
             <div>
               <div class="text-uppercase small fw-bold opacity-75">Total Queries</div>
-              <h2 class="mb-0 fw-bold">{{ metrics.total_queries }}</h2>
+              <h3 class="mb-0 fw-bold">{{ metrics.total_queries }}</h3>
             </div>
             <i class="fas fa-comments fa-2x opacity-50"></i>
           </div>
@@ -30,13 +30,13 @@
       </div>
     </div>
 
-    <div class="col-md-3">
-      <div class="card shadow-sm border-0 bg-info text-white">
+    <div class="col-xl-2 col-md-4 col-sm-6">
+      <div class="card shadow-sm border-0 bg-info text-white h-100">
         <div class="card-body">
           <div class="d-flex justify-content-between align-items-center">
             <div>
               <div class="text-uppercase small fw-bold opacity-75">Avg Latency</div>
-              <h2 class="mb-0 fw-bold">{{ metrics.avg_latency_ms }} <small class="fs-6">ms</small></h2>
+              <h3 class="mb-0 fw-bold">{{ metrics.avg_latency_ms }} <small class="fs-6">ms</small></h3>
             </div>
             <i class="fas fa-bolt fa-2x opacity-50"></i>
           </div>
@@ -44,13 +44,13 @@
       </div>
     </div>
 
-    <div class="col-md-3">
-      <div class="card shadow-sm border-0 bg-success text-white">
+    <div class="col-xl-2 col-md-4 col-sm-6">
+      <div class="card shadow-sm border-0 bg-success text-white h-100">
         <div class="card-body">
           <div class="d-flex justify-content-between align-items-center">
             <div>
-              <div class="text-uppercase small fw-bold opacity-75">Satisfaction Rate</div>
-              <h2 class="mb-0 fw-bold">{{ metrics.satisfaction_rate }}%</h2>
+              <div class="text-uppercase small fw-bold opacity-75">Satisfaction</div>
+              <h3 class="mb-0 fw-bold">{{ metrics.satisfaction_rate }}%</h3>
             </div>
             <i class="fas fa-thumbs-up fa-2x opacity-50"></i>
           </div>
@@ -58,13 +58,41 @@
       </div>
     </div>
 
-    <div class="col-md-3">
-      <div class="card shadow-sm border-0 bg-secondary text-white">
+    <div class="col-xl-2 col-md-4 col-sm-6">
+      <div class="card shadow-sm border-0 bg-warning text-dark h-100">
         <div class="card-body">
           <div class="d-flex justify-content-between align-items-center">
             <div>
-              <div class="text-uppercase small fw-bold opacity-75">Avg Chunks / Query</div>
-              <h2 class="mb-0 fw-bold">{{ metrics.avg_chunks }}</h2>
+              <div class="text-uppercase small fw-bold opacity-75">Total Tokens</div>
+              <h3 class="mb-0 fw-bold">{{ metrics.total_tokens }}</h3>
+            </div>
+            <i class="fas fa-calculator fa-2x opacity-50"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-xl-2 col-md-4 col-sm-6">
+      <div class="card shadow-sm border-0 bg-dark text-white h-100">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <div class="text-uppercase small fw-bold opacity-75">Total Cost</div>
+              <h3 class="mb-0 fw-bold">${{ "%.5f"|format(metrics.total_cost_usd) }}</h3>
+            </div>
+            <i class="fas fa-coins fa-2x opacity-50 text-warning"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-xl-2 col-md-4 col-sm-6">
+      <div class="card shadow-sm border-0 bg-secondary text-white h-100">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <div class="text-uppercase small fw-bold opacity-75">Avg Chunks</div>
+              <h3 class="mb-0 fw-bold">{{ metrics.avg_chunks }}</h3>
             </div>
             <i class="fas fa-layer-group fa-2x opacity-50"></i>
           </div>
@@ -123,14 +151,16 @@
         <table class="table table-hover align-middle mb-0">
           <thead class="table-light">
             <tr>
-              <th scope="col" style="width: 60px;">#</th>
-              <th scope="col" style="width: 110px;">User</th>
+              <th scope="col" style="width: 50px;">#</th>
+              <th scope="col" style="width: 90px;">User</th>
               <th scope="col">Query</th>
+              <th scope="col" style="width: 130px;">Filter Doc</th>
               <th scope="col">Response Preview</th>
-              <th scope="col" style="width: 100px;">Latency</th>
-              <th scope="col" style="width: 90px;">Chunks</th>
+              <th scope="col" style="width: 95px;">Latency</th>
+              <th scope="col" style="width: 105px;">Tokens/Cost</th>
+              <th scope="col" style="width: 75px;">Chunks</th>
               <th scope="col" style="width: 90px;">Feedback</th>
-              <th scope="col" style="width: 160px;">Timestamp</th>
+              <th scope="col" style="width: 145px;">Timestamp</th>
             </tr>
           </thead>
           <tbody>
@@ -138,14 +168,25 @@
             <tr>
               <td><code>{{ log.id }}</code></td>
               <td><span class="badge bg-secondary">{{ log.username }}</span></td>
-              <td class="fw-semibold text-break" style="max-width: 250px;">{{ log.user_query }}</td>
-              <td class="text-muted small text-break" style="max-width: 300px;">
-                {{ log.bot_answer[:120] }}{% if log.bot_answer|length > 120 %}...{% endif %}
+              <td class="fw-semibold text-break" style="max-width: 220px;">{{ log.user_query }}</td>
+              <td>
+                {% if log.target_doc %}
+                  <span class="badge bg-light text-info border text-truncate d-inline-block" style="max-width: 120px;" title="{{ log.target_doc }}"><i class="fas fa-filter me-1"></i>{{ log.target_doc }}</span>
+                {% else %}
+                  <span class="badge bg-light text-muted border">All</span>
+                {% endif %}
+              </td>
+              <td class="text-muted small text-break" style="max-width: 260px;">
+                {{ log.bot_answer[:100] }}{% if log.bot_answer|length > 100 %}...{% endif %}
               </td>
               <td>
                 <span class="badge bg-light text-dark border">
-                  <i class="fas fa-stopwatch me-1 text-primary"></i>{{ log.latency_ms|round(0)|int }} ms
+                  {% if log.latency_ms < 25 %}<i class="fas fa-bolt text-warning me-1"></i>{% else %}<i class="fas fa-stopwatch me-1 text-primary"></i>{% endif %}{{ log.latency_ms|round(0)|int }} ms
                 </span>
+              </td>
+              <td>
+                <div class="small fw-semibold">{{ log.tokens or 0 }} tok</div>
+                <div class="text-muted" style="font-size: 0.75rem;">${{ "%.5f"|format(log.cost_usd or 0.0) }}</div>
               </td>
               <td>
                 <span class="badge bg-light text-secondary border">

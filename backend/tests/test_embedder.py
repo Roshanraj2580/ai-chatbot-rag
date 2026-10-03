@@ -1,9 +1,10 @@
-"""
-Unit tests for embedding functionality (Backward Compatibility).
-"""
+import os
 import pytest
 import numpy as np
 from backend.embedder import get_embedder, reset_embedder
+
+local_model_exists = os.path.exists(os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "models", "nomic-embed-text-v1"))
+pytestmark = pytest.mark.skipif(not local_model_exists, reason="Local nomic-embed-text-v1 model not downloaded on disk")
 
 
 def test_embedder_initialization():

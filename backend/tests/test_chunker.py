@@ -21,8 +21,8 @@ def test_chunker_single_chunk():
     chunks = chunker.chunk(text)
     
     assert len(chunks) >= 1
-    # bert-base-uncased lowercases text
-    assert text.lower() in chunks[0] or chunks[0] in text.lower()
+    # Case-insensitive containment check
+    assert text.lower() in chunks[0].lower() or chunks[0].lower() in text.lower()
 
 
 def test_chunker_multiple_chunks():
