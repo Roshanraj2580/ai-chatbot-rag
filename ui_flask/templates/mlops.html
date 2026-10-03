@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+{% block title %}MLOps Dashboard - AI RAG Chatbot{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4">
+  <!-- Header -->
+  <div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+      <h3 class="mb-0"><i class="fas fa-chart-line text-primary me-2"></i>MLOps & RAG Observability</h3>
+      <small class="text-muted">Real-time performance metrics, query telemetry, and quality evaluation</small>
+    </div>
+    <a href="/mlops" class="btn btn-outline-secondary btn-sm">
+      <i class="fas fa-sync-alt me-1"></i> Refresh Metrics
+    </a>
+  </div>
+
+  <!-- Metric Cards -->
+  <div class="row g-3 mb-4">
+    <div class="col-md-3">
+      <div class="card shadow-sm border-0 bg-primary text-white">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <div class="text-uppercase small fw-bold opacity-75">Total Queries</div>
+              <h2 class="mb-0 fw-bold">{{ metrics.total_queries }}</h2>
+            </div>
+            <i class="fas fa-comments fa-2x opacity-50"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-3">
+      <div class="card shadow-sm border-0 bg-info text-white">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <div class="text-uppercase small fw-bold opacity-75">Avg Latency</div>
+              <h2 class="mb-0 fw-bold">{{ metrics.avg_latency_ms }} <small class="fs-6">ms</small></h2>
+            </div>
+            <i class="fas fa-bolt fa-2x opacity-50"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-3">
+      <div class="card shadow-sm border-0 bg-success text-white">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <div class="text-uppercase small fw-bold opacity-75">Satisfaction Rate</div>
+              <h2 class="mb-0 fw-bold">{{ metrics.satisfaction_rate }}%</h2>
+            </div>
+            <i class="fas fa-thumbs-up fa-2x opacity-50"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-3">
+      <div class="card shadow-sm border-0 bg-secondary text-white">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <div class="text-uppercase small fw-bold opacity-75">Avg Chunks / Query</div>
+              <h2 class="mb-0 fw-bold">{{ metrics.avg_chunks }}</h2>
+            </div>
+            <i class="fas fa-layer-group fa-2x opacity-50"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- System Information & Telemetry Status -->
+  <div class="row g-3 mb-4">
+    <div class="col-lg-12">
+      <div class="card shadow-sm border-0">
+        <div class="card-header bg-light">
+          <h5 class="card-title mb-0"><i class="fas fa-server me-2"></i>System Telemetry & Architecture</h5>
+        </div>
+        <div class="card-body">
+          <div class="row text-center">
+            <div class="col-md-3 border-end">
+              <small class="text-muted d-block">LLM Engine</small>
+              <strong class="text-dark">Gemini 2.5 Flash</strong>
+            </div>
+            <div class="col-md-3 border-end">
+              <small class="text-muted d-block">Vector Store</small>
+              <strong class="text-dark">ChromaDB Local</strong>
+            </div>
+            <div class="col-md-3 border-end">
+              <small class="text-muted d-block">Retrieval Mode</small>
+              <strong class="text-dark">Hybrid (BM25 + Dense)</strong>
+            </div>
+            <div class="col-md-3">
+              <small class="text-muted d-block">Observability DB</small>
+              <strong class="text-success"><i class="fas fa-check-circle me-1"></i>SQLite Active</strong>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Query Telemetry Audit Log Table -->
+  <div class="card shadow-sm border-0 mb-4">
+    <div class="card-header bg-light d-flex justify-content-between align-items-center">
+      <h5 class="card-title mb-0"><i class="fas fa-list-alt me-2"></i>Recent Query Telemetry (Latest 25)</h5>
+      <span class="badge bg-dark">{{ metrics.recent_logs|length }} Queries Logged</span>
+    </div>
+    <div class="card-body p-0">
+      {% if metrics.recent_logs %}
+      <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th scope="col" style="width: 60px;">#</th>
+              <th scope="col" style="width: 110px;">User</th>
+              <th scope="col">Query</th>
+              <th scope="col">Response Preview</th>
+              <th scope="col" style="width: 100px;">Latency</th>
+              <th scope="col" style="width: 90px;">Chunks</th>
+              <th scope="col" style="width: 90px;">Feedback</th>
+              <th scope="col" style="width: 160px;">Timestamp</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for log in metrics.recent_logs %}
+            <tr>
+              <td><code>{{ log.id }}</code></td>
+              <td><span class="badge bg-secondary">{{ log.username }}</span></td>
+              <td class="fw-semibold text-break" style="max-width: 250px;">{{ log.user_query }}</td>
+              <td class="text-muted small text-break" style="max-width: 300px;">
+                {{ log.bot_answer[:120] }}{% if log.bot_answer|length > 120 %}...{% endif %}
+              </td>
+              <td>
+                <span class="badge bg-light text-dark border">
+                  <i class="fas fa-stopwatch me-1 text-primary"></i>{{ log.latency_ms|round(0)|int }} ms
+                </span>
+              </td>
+              <td>
+                <span class="badge bg-light text-secondary border">
+                  {{ log.retrieved_chunks_count }}
+                </span>
+              </td>
+              <td>
+                {% if log.feedback == 1 %}
+                  <span class="badge bg-success"><i class="fas fa-thumbs-up"></i> Helpful</span>
+                {% elif log.feedback == -1 %}
+                  <span class="badge bg-danger"><i class="fas fa-thumbs-down"></i> Poor</span>
+                {% else %}
+                  <span class="badge bg-light text-muted border">None</span>
+                {% endif %}
+              </td>
+              <td class="small text-muted">{{ log.timestamp }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="text-center py-5 text-muted">
+        <i class="fas fa-database fa-3x mb-3 text-secondary opacity-50"></i>
+        <p>No queries logged yet. Start asking questions in the <a href="/chat">Chat</a> tab to see live telemetry!</p>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

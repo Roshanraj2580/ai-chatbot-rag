@@ -85,10 +85,13 @@ def create_embedder(provider: Optional[str] = None) -> EmbedderInterface:
             logger.info("Falling back to local-only mode")
             return LocalEmbedder()
 
-        # Create local fallback
-        secondary = LocalEmbedder()
-
-        return FallbackEmbedder(primary, secondary)
+        # Create local fallback if available
+        try:
+            secondary = LocalEmbedder()
+            return FallbackEmbedder(primary, secondary)
+        except (FileNotFoundError, Exception) as e:
+            logger.warning(f"Local fallback embedder not available ({e}). Using Gemini primary embedder.")
+            return primary
 
     else:
         raise ValueError(

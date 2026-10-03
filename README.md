@@ -14,7 +14,11 @@ Most "RAG chatbot" tutorials do naive top-k vector search and call it done. This
 - **Gemini-first, low-memory embeddings** — embeddings are generated entirely through the Gemini API, so the backend never has to load a local embedding model into memory, which matters a lot on constrained hosting like Render's free tier.
 - **Memory-safe ingestion** — the PDF pipeline streams page-by-page and chunk-batch-by-chunk instead of loading an entire document into memory, with explicit garbage collection between batches.
 - **Voice, not just text** — a full speech-to-text → RAG → text-to-speech loop for hands-free conversation with your documents.
-- **Tested** — 12 test modules covering the chunker, embedder, PDF parsing, Chroma operations, and API endpoints.
+- **User Authentication & Session Management** — secure user registration, password hashing (scrypt), and login sessions (`admin` / `admin123` included).
+- **Persistent Chat History** — user conversations and cited sources are saved in a local SQLite database, persisting across page refreshes and browser sessions.
+- **MLOps & RAG Observability Dashboard** — real-time tracking of query latency (ms), chunks retrieved, thumbs up/down user feedback, satisfaction score %, and a live query audit table (`/mlops`).
+- **CI/CD Pipeline** — automated GitHub Actions workflow (`.github/workflows/ci.yml`) for linting, unit test execution, and Docker build verification.
+- **Tested** — comprehensive test modules covering authentication, telemetry, chunker, embedder, PDF parsing, Chroma operations, and API endpoints.
 
 ---
 

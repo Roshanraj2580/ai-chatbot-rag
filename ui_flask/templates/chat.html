@@ -7,14 +7,19 @@
         <h4 class="mb-0">
           <i class="fas fa-comments"></i> Chat with Your Documents
         </h4>
-        <span id="retrievalModeBadge" class="badge bg-light text-dark">
-          <i class="fas fa-spinner fa-spin"></i> Loading...
-        </span>
+        <div>
+          <span id="retrievalModeBadge" class="badge bg-light text-dark">
+            <i class="fas fa-spinner fa-spin"></i> Loading...
+          </span>
+          <button class="btn btn-sm btn-outline-light ms-2" onclick="clearChatHistory()" title="Clear chat history">
+            <i class="fas fa-trash-alt"></i> Clear
+          </button>
+        </div>
       </div>
       <div class="card-body p-0">
         <!-- Chat Messages Container -->
         <div id="chatMessages" class="chat-messages p-3">
-          <div class="text-center text-muted">
+          <div id="emptyChatNotice" class="text-center text-muted">
             <i class="fas fa-comment-dots fa-2x mb-2"></i>
             <p>Start asking questions about your documents...</p>
           </div>
@@ -45,7 +50,7 @@
             >
               <span class="visually-hidden">Loading...</span>
             </div>
-            <span class="ms-2 text-muted">Thinking...</span>
+            <span class="ms-2 text-muted">Thinking & retrieving...</span>
           </div>
         </div>
       </div>
@@ -76,6 +81,228 @@
     </div>
   </div>
 </div>
-{% endblock %} {% block extra_js %}
-<script src="{{ url_for('static', filename='js/chat.js') }}"></script>
+{% endblock %} 
+
+{% block extra_js %}
+<script>
+// Load configuration on startup
+fetch('/api/config')
+  .then(res => res.json())
+  .then(config => {
+    const badge = document.getElementById('retrievalModeBadge');
+    if (badge) {
+      badge.textContent = `Mode: ${config.retrieval_mode || 'hybrid'} (k=${config.retrieval_k || 5})`;
+    }
+  })
+  .catch(() => {
+    const badge = document.getElementById('retrievalModeBadge');
+    if (badge) badge.textContent = 'Mode: Hybrid';
+  });
+
+// Handle enter key in input
+function handleKeyPress(e) {
+  if (e.key === 'Enter') {
+    sendMessage();
+  }
+}
+
+// Append User Message Bubble
+function appendUserMessage(text) {
+  const emptyNotice = document.getElementById('emptyChatNotice');
+  if (emptyNotice) emptyNotice.style.display = 'none';
+
+  const container = document.getElementById('chatMessages');
+  const msgDiv = document.createElement('div');
+  msgDiv.className = 'chat-message user';
+  msgDiv.innerHTML = `
+    <div class="message-bubble">
+      ${escapeHtml(text)}
+    </div>
+    <div class="message-timestamp">Just now</div>
+  `;
+  container.appendChild(msgDiv);
+  container.scrollTop = container.scrollHeight;
+}
+
+// Append Assistant Message Bubble with MLOps Latency and Feedback
+function appendBotMessage(data, isHistory = false) {
+  const emptyNotice = document.getElementById('emptyChatNotice');
+  if (emptyNotice) emptyNotice.style.display = 'none';
+
+  const container = document.getElementById('chatMessages');
+  const msgDiv = document.createElement('div');
+  msgDiv.className = 'chat-message assistant';
+
+  let citationsHtml = '';
+  if (data.citations && data.citations.length > 0) {
+    const citationItems = data.citations.map(c => 
+      `<li><i class="fas fa-file-pdf me-1 text-danger"></i>${escapeHtml(c.source_filename || 'Doc')} (Page ${c.page_number || '1'})</li>`
+    ).join('');
+    citationsHtml = `
+      <div class="citation mt-2">
+        <small class="fw-bold"><i class="fas fa-book-reader me-1"></i>Sources:</small>
+        <ul class="mb-0 ps-3 small">${citationItems}</ul>
+      </div>
+    `;
+  }
+
+  const logId = data.log_id || data.id;
+  const latency = data.latency_ms ? `${Math.round(data.latency_ms)} ms` : '';
+  const feedback = data.feedback || 0;
+
+  let feedbackHtml = '';
+  if (logId) {
+    feedbackHtml = `
+      <div class="d-flex align-items-center mt-2 pt-1 border-top">
+        ${latency ? `<span class="badge bg-light text-dark border me-2"><i class="fas fa-stopwatch text-primary me-1"></i>${latency}</span>` : ''}
+        <small class="text-muted me-2">Was this helpful?</small>
+        <button class="btn btn-sm btn-outline-success py-0 px-2 me-1 ${feedback === 1 ? 'active' : ''}" 
+                onclick="sendFeedback(${logId}, 1, this)" title="Helpful">
+          <i class="fas fa-thumbs-up"></i>
+        </button>
+        <button class="btn btn-sm btn-outline-danger py-0 px-2 ${feedback === -1 ? 'active' : ''}" 
+                onclick="sendFeedback(${logId}, -1, this)" title="Not helpful">
+          <i class="fas fa-thumbs-down"></i>
+        </button>
+      </div>
+    `;
+  }
+
+  msgDiv.innerHTML = `
+    <div class="message-bubble">
+      <div>${escapeHtml(data.answer || data.bot_answer || '')}</div>
+      ${citationsHtml}
+      ${feedbackHtml}
+    </div>
+    <div class="message-timestamp">${data.timestamp || 'Just now'}</div>
+  `;
+  container.appendChild(msgDiv);
+  container.scrollTop = container.scrollHeight;
+}
+
+// Send user question to /api/ask
+function sendMessage() {
+  const input = document.getElementById('messageInput');
+  const query = input.value.trim();
+  if (!query) return;
+
+  // Add user bubble
+  appendUserMessage(query);
+  input.value = '';
+
+  const loader = document.getElementById('loadingIndicator');
+  if (loader) loader.style.display = 'block';
+
+  fetch('/api/ask', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query: query })
+  })
+  .then(res => res.json())
+  .then(data => {
+    if (loader) loader.style.display = 'none';
+    if (data.error) {
+      appendBotMessage({ answer: '⚠️ Error: ' + data.error });
+      return;
+    }
+    appendBotMessage(data);
+
+    // Update chunks container if chunks are returned
+    if (data.retrieved_chunks && data.retrieved_chunks.length > 0) {
+      const chunksDiv = document.getElementById('chunksContent');
+      if (chunksDiv) {
+        chunksDiv.innerHTML = data.retrieved_chunks.map((c, idx) => `
+          <div class="border rounded p-2 mb-2 bg-light">
+            <div class="d-flex justify-content-between small text-muted mb-1">
+              <strong>Chunk ${idx + 1} (${escapeHtml(c.metadata?.source_filename || 'doc')}, Page ${c.metadata?.page_number || '1'})</strong>
+              <span>Distance: ${(c.distance !== undefined ? c.distance.toFixed(3) : 'N/A')}</span>
+            </div>
+            <div class="small">${escapeHtml(c.document || '')}</div>
+          </div>
+        `).join('');
+      }
+    }
+  })
+  .catch(err => {
+    if (loader) loader.style.display = 'none';
+    appendBotMessage({ answer: '⚠️ Network error communicating with server.' });
+  });
+}
+
+// Send MLOps Feedback (+1 or -1)
+function sendFeedback(logId, value, buttonElement) {
+  fetch('/api/feedback', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ log_id: logId, feedback: value })
+  })
+  .then(res => res.json())
+  .then(res => {
+    if (res.status === 'success') {
+      const parent = buttonElement.parentElement;
+      parent.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
+      buttonElement.classList.add('active');
+    }
+  });
+}
+
+// Clear chat history
+function clearChatHistory() {
+  if (!confirm("Are you sure you want to clear your chat history?")) return;
+  fetch('/api/history/clear', { method: 'POST' })
+    .then(res => res.json())
+    .then(() => {
+      const container = document.getElementById('chatMessages');
+      container.innerHTML = `
+        <div id="emptyChatNotice" class="text-center text-muted">
+          <i class="fas fa-comment-dots fa-2x mb-2"></i>
+          <p>Chat history cleared. Start asking questions...</p>
+        </div>
+      `;
+    });
+}
+
+// Load user chat history on page load
+function loadChatHistory() {
+  fetch('/api/history')
+    .then(res => {
+      if (res.status === 401) {
+        window.location.href = '/login';
+        return [];
+      }
+      return res.json();
+    })
+    .then(history => {
+      if (Array.isArray(history) && history.length > 0) {
+        const emptyNotice = document.getElementById('emptyChatNotice');
+        if (emptyNotice) emptyNotice.style.display = 'none';
+
+        history.forEach(item => {
+          // Render user query
+          appendUserMessage(item.user_query);
+          // Render bot answer
+          appendBotMessage({
+            id: item.id,
+            bot_answer: item.bot_answer,
+            citations: item.citations,
+            latency_ms: item.latency_ms,
+            feedback: item.feedback,
+            timestamp: item.timestamp
+          }, true);
+        });
+      }
+    })
+    .catch(() => {});
+}
+
+function escapeHtml(text) {
+  if (!text) return '';
+  const div = document.createElement('div');
+  div.innerText = text;
+  return div.innerHTML;
+}
+
+// Execute history load
+document.addEventListener('DOMContentLoaded', loadChatHistory);
+</script>
 {% endblock %}

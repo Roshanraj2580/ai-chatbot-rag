@@ -150,14 +150,14 @@ class QueryService:
     def __init__(
         self, 
         api_key: Optional[str] = None, 
-        model_name: str = "gemini-2.5-flash"
+        model_name: Optional[str] = None
     ):
         """
         Initialize query service with Gemini API.
         
         Args:
             api_key: Google API key (defaults to GOOGLE_API_KEY env var)
-            model_name: Gemini model name for generation
+            model_name: Gemini model name for generation (defaults to LLM_MODEL or gemini-3.8-flash)
         
         Raises:
             ValueError: If GOOGLE_API_KEY not set
@@ -168,7 +168,7 @@ class QueryService:
         
         # NEW: Create genai.Client (replaces genai.configure + GenerativeModel)
         self.client = genai.Client(api_key=self.api_key)
-        self.model_name = model_name
+        self.model_name = model_name or os.getenv("LLM_MODEL", "gemini-3.8-flash")
         
         self.embedder = get_embedder()
         self.chroma_client = get_chroma_client()
@@ -258,20 +258,38 @@ class QueryService:
                     max_output_tokens=1024  # Increased for longer answers
                 )
             )
-            
             answer = response.text.strip()
             logger.info(f"Generated answer: {answer[:100]}...")
             
         except Exception as e:
-            logger.error(f"Gemini API call failed: {e}")
+            logger.warning(f"Primary model {self.model_name} failed: {e}. Trying fallback models...")
+            fallbacks = ["gemini-3.8-flash", "gemini-flash-latest", "gemini-3.5-flash"]
+            answer = None
+            for fb_model in fallbacks:
+                if fb_model == self.model_name:
+                    continue
+                try:
+                    logger.info(f"Attempting fallback model: {fb_model}")
+                    response = self.client.models.generate_content(
+                        model=fb_model,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            temperature=self.temperature,
+                            max_output_tokens=1024
+                        )
+                    )
+                    answer = response.text.strip()
+                    self.model_name = fb_model
+                    logger.info(f"Successfully generated answer with {fb_model}: {answer[:100]}...")
+                    break
+                except Exception as fb_err:
+                    logger.warning(f"Fallback {fb_model} failed: {fb_err}")
             
-            # Check for rate limiting
-            if "quota" in str(e).lower() or "rate" in str(e).lower():
-                raise RuntimeError(
-                    "Gemini API rate limit exceeded. Please try again later."
-                ) from e
-            
-            raise RuntimeError(f"Gemini API error: {e}") from e
+            if answer is None:
+                logger.error(f"All Gemini models failed: {e}")
+                if "quota" in str(e).lower() or "rate" in str(e).lower():
+                    raise RuntimeError("Gemini API rate limit exceeded. Please try again later.") from e
+                raise RuntimeError(f"Gemini API error: {e}") from e
         
         # Extract citations from metadata (use unique chunks)
         citations = []

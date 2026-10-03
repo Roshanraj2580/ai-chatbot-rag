@@ -55,6 +55,27 @@
               <i class="fas fa-folder-open"></i> Documents
             </a>
           </li>
+          <li class="nav-item">
+            <a class="nav-link {% if request.path == '/mlops' %}active{% endif %}" href="/mlops">
+              <i class="fas fa-chart-line"></i> MLOps
+            </a>
+          </li>
+          {% if session.get('username') %}
+          <li class="nav-item d-flex align-items-center ms-lg-3 my-2 my-lg-0">
+            <span class="badge bg-secondary me-2 py-2 px-3">
+              <i class="fas fa-user me-1 text-info"></i> {{ session.get('username') }}
+            </span>
+            <a class="btn btn-outline-danger btn-sm" href="/logout">
+              <i class="fas fa-sign-out-alt"></i> Logout
+            </a>
+          </li>
+          {% else %}
+          <li class="nav-item ms-lg-3 my-2 my-lg-0">
+            <a class="btn btn-outline-light btn-sm" href="/login">
+              <i class="fas fa-sign-in-alt"></i> Sign In
+            </a>
+          </li>
+          {% endif %}
         </ul>
       </div>
     </div>

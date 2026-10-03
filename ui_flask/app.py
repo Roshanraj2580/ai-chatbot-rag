@@ -5,14 +5,34 @@ Provides web interface for document upload, chat, and voice chat features.
 
 import os
 import io
+import time
 import logging
-from flask import Flask, render_template, request, jsonify, send_file
+from functools import wraps
+from flask import Flask, render_template, request, jsonify, send_file, session, redirect, url_for, flash
 from werkzeug.utils import secure_filename
 from werkzeug.exceptions import BadRequest
 import requests
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Import SQLite database module for auth, history, and MLOps
+try:
+    from ui_flask.database import (
+        init_db, register_user, authenticate_user,
+        log_chat_interaction, get_user_chat_history,
+        clear_user_chat_history, record_feedback, get_mlops_metrics
+    )
+except ImportError:
+    from database import (
+        init_db, register_user, authenticate_user,
+        log_chat_interaction, get_user_chat_history,
+        clear_user_chat_history, record_feedback, get_mlops_metrics
+    )
 
 # Configuration
-BACKEND_URL = os.getenv("BACKEND_URL", "https://ai-rag-chatbot-backend-pnnq.onrender.com")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
 UPLOAD_FOLDER = "temp_uploads"
 ALLOWED_EXTENSIONS = {"pdf"}
 
@@ -22,8 +42,12 @@ SSL_CERT_PATH = os.getenv("SSL_CERT_PATH", None)
 SSL_KEY_PATH = os.getenv("SSL_KEY_PATH", None)
 
 app = Flask(__name__)
+app.secret_key = os.getenv("SECRET_KEY", "rag-chatbot-secret-key-2026-production")
 app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
 app.config["MAX_CONTENT_LENGTH"] = 50 * 1024 * 1024  # 50MB max file size
+
+# Initialize database tables on startup
+init_db()
 
 # Setup logging
 logging.basicConfig(level=logging.INFO)
@@ -41,13 +65,14 @@ def allowed_file(filename):
 def call_backend(endpoint, method="GET", **kwargs):
     """Helper to call FastAPI backend."""
     url = f"{BACKEND_URL}{endpoint}"
+    timeout = kwargs.pop("timeout", 120)
     try:
         if method == "GET":
-            response = requests.get(url, timeout=30, **kwargs)
+            response = requests.get(url, timeout=timeout, **kwargs)
         elif method == "POST":
-            response = requests.post(url, timeout=30, **kwargs)
+            response = requests.post(url, timeout=timeout, **kwargs)
         elif method == "DELETE":
-            response = requests.delete(url, timeout=30, **kwargs)
+            response = requests.delete(url, timeout=timeout, **kwargs)
         else:
             return {"error": f"Unsupported method: {method}"}
         
@@ -68,6 +93,70 @@ def call_backend(endpoint, method="GET", **kwargs):
         return {"error": str(e)}
 
 
+def login_required(f):
+    """Decorator to require login for protected routes."""
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if "user_id" not in session:
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Authentication required. Please sign in.", "status": 401}), 401
+            return redirect(url_for("login", next=request.path))
+        return f(*args, **kwargs)
+    return decorated_function
+
+
+# ============================================================================
+# Authentication Routes
+# ============================================================================
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    """User login endpoint."""
+    if request.method == "POST":
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+        
+        user = authenticate_user(username, password)
+        if user:
+            session["user_id"] = user["id"]
+            session["username"] = user["username"]
+            session["role"] = user["role"]
+            flash(f"Welcome back, {user['username']}!", "success")
+            next_url = request.args.get("next") or url_for("chat")
+            return redirect(next_url)
+        else:
+            flash("Invalid username or password. (Try admin / admin123)", "danger")
+            return redirect(url_for("login"))
+            
+    return render_template("login.html")
+
+
+@app.route("/register", methods=["POST"])
+def register():
+    """User registration endpoint."""
+    username = request.form.get("username", "")
+    password = request.form.get("password", "")
+    
+    if len(password) < 4:
+        flash("Password must be at least 4 characters long.", "danger")
+        return redirect(url_for("login"))
+        
+    success, res = register_user(username, password)
+    if success:
+        flash("Registration successful! You can now log in.", "success")
+    else:
+        flash(f"Registration error: {res}", "danger")
+    return redirect(url_for("login"))
+
+
+@app.route("/logout")
+def logout():
+    """Log out current user."""
+    session.clear()
+    flash("You have been signed out.", "info")
+    return redirect(url_for("login"))
+
+
 # ============================================================================
 # View Routes (Render HTML Templates)
 # ============================================================================
@@ -79,24 +168,28 @@ def index():
 
 
 @app.route("/chat")
+@login_required
 def chat():
     """Chat interface page."""
     return render_template("chat.html")
 
 
 @app.route("/voice")
+@login_required
 def voice():
     """Voice chat interface page."""
     return render_template("voice.html")
 
 
 @app.route("/upload")
+@login_required
 def upload():
     """Document upload page."""
     return render_template("upload.html")
 
 
 @app.route("/documents")
+@login_required
 def documents():
     """Document library page."""
     # Fetch documents from backend
@@ -106,8 +199,16 @@ def documents():
     return render_template("documents.html", documents=docs)
 
 
+@app.route("/mlops")
+@login_required
+def mlops():
+    """MLOps observability dashboard."""
+    metrics = get_mlops_metrics()
+    return render_template("mlops.html", metrics=metrics)
+
+
 # ============================================================================
-# API Routes (Proxy to FastAPI Backend)
+# API Routes (Proxy to FastAPI Backend & MLOps Tracking)
 # ============================================================================
 
 @app.route("/api/health", methods=["GET"])
@@ -125,16 +226,73 @@ def get_config():
 
 
 @app.route("/api/ask", methods=["POST"])
+@login_required
 def ask():
-    """Ask a question (RAG query)."""
+    """Ask a question (RAG query) with MLOps latency tracking & chat logging."""
     data = request.json
     query = data.get("query", "")
     
     if not query:
         return jsonify({"error": "Query is required"}), 400
     
+    # 1. Measure query latency (MLOps performance tracking)
+    start_time = time.time()
     result = call_backend("/ask", method="POST", json={"query": query})
+    latency_ms = (time.time() - start_time) * 1000.0
+    
+    if isinstance(result, dict) and "error" in result:
+        return jsonify(result), 500
+        
+    answer = result.get("answer", "")
+    citations = result.get("citations", [])
+    chunks_count = len(result.get("retrieved_chunks", []))
+    
+    # 2. Log interaction into SQLite for Chat History & MLOps Telemetry
+    log_id = log_chat_interaction(
+        user_id=session.get("user_id"),
+        username=session.get("username", "user"),
+        query=query,
+        answer=answer,
+        citations=citations,
+        chunks_count=chunks_count,
+        latency_ms=latency_ms
+    )
+    
+    # Attach telemetry metadata to response
+    result["log_id"] = log_id
+    result["latency_ms"] = round(latency_ms, 2)
     return jsonify(result)
+
+
+@app.route("/api/history", methods=["GET"])
+@login_required
+def get_history():
+    """Get authenticated user's chat history."""
+    history = get_user_chat_history(session["user_id"])
+    return jsonify(history)
+
+
+@app.route("/api/history/clear", methods=["POST"])
+@login_required
+def clear_history():
+    """Clear authenticated user's chat history."""
+    clear_user_chat_history(session["user_id"])
+    return jsonify({"status": "success", "message": "Chat history cleared"})
+
+
+@app.route("/api/feedback", methods=["POST"])
+@login_required
+def feedback():
+    """Submit user feedback (+1 for positive, -1 for negative) on a response."""
+    data = request.json or {}
+    log_id = data.get("log_id")
+    feedback_val = data.get("feedback")
+    
+    if not log_id or feedback_val not in (1, -1):
+        return jsonify({"error": "Invalid feedback data"}), 400
+        
+    success = record_feedback(log_id, session["user_id"], feedback_val)
+    return jsonify({"status": "success" if success else "failed"})
 
 
 @app.route("/api/upload", methods=["POST"])

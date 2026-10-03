@@ -16,6 +16,8 @@ ENV/
 chroma_data/
 models/
 temp_uploads/
+*.db
+rag_app.db
 
 # IDE
 .vscode/
