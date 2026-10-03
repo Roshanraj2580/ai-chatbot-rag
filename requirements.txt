@@ -43,3 +43,6 @@ einops
 # Hybrid Search - BM25 keyword retrieval
 rank-bm25==0.2.2
 tiktoken>=0.7.0
+
+# Caching & Latency Optimization (Redis / In-memory)
+redis>=5.0.0

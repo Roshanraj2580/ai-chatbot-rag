@@ -204,6 +204,11 @@ def documents():
 def mlops():
     """MLOps observability dashboard."""
     metrics = get_mlops_metrics()
+    cache_stats = call_backend("/cache/stats")
+    if isinstance(cache_stats, dict) and "error" not in cache_stats:
+        metrics["cache"] = cache_stats
+    else:
+        metrics["cache"] = {"backend": "in-memory (fallback)", "hits": 0, "misses": 0, "hit_rate_pct": 0.0}
     return render_template("mlops.html", metrics=metrics)
 
 

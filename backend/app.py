@@ -17,6 +17,7 @@ from backend.ingest import get_ingestor
 from backend.query import get_query_service
 from backend.chroma_client import get_chroma_client
 from backend.voice_realtime import get_realtime_conversation
+from backend.cache import get_cache
 
 # Load environment variables
 load_dotenv()
@@ -226,6 +227,10 @@ async def upload_document(file: UploadFile = File(...)):
         # Clean up temp file
         os.unlink(tmp_path)
 
+        # Invalidate query cache for fresh document retrieval
+        get_cache().clear()
+        logger.info("Invalidated query cache after document upload")
+
         return IngestResponse(**result)
 
     except ValueError as e:
@@ -411,8 +416,10 @@ async def delete_document(doc_id: str):
 
         # Delete the document
         count = chroma_client.delete_document(doc_id)
-
-        logger.info(f"Deleted document {doc_id}, removed {count} chunks")
+        
+        # Invalidate query cache
+        get_cache().clear()
+        logger.info(f"Deleted document {doc_id}, removed {count} chunks, invalidated cache")
         return {
             "status": "success",
             "deleted_chunks": count,
@@ -491,6 +498,12 @@ async def _process_query(query: str) -> QueryResponse:
     except Exception as e:
         logger.error(f"Query failed: {e}")
         raise HTTPException(status_code=500, detail=f"Query failed: {str(e)}")
+
+
+@app.get("/cache/stats")
+async def get_cache_stats():
+    """Get query cache statistics."""
+    return get_cache().get_stats()
 
 
 # Health check endpoint
