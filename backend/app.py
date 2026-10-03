@@ -18,6 +18,7 @@ from backend.query import get_query_service
 from backend.chroma_client import get_chroma_client
 from backend.voice_realtime import get_realtime_conversation
 from backend.cache import get_cache
+from backend.graph import build_knowledge_graph
 
 # Load environment variables
 load_dotenv()
@@ -507,6 +508,13 @@ async def _process_query(query: str, filter_doc: Optional[str] = None) -> QueryR
 async def get_cache_stats():
     """Get query cache statistics."""
     return get_cache().get_stats()
+
+
+@app.get("/graph/data")
+async def get_graph_data():
+    """Build and return Document Knowledge Graph nodes and edges."""
+    chroma = chroma_client or get_chroma_client()
+    return build_knowledge_graph(chroma)
 
 
 # Health check endpoint

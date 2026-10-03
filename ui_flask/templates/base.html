@@ -60,6 +60,11 @@
               <i class="fas fa-chart-line"></i> MLOps
             </a>
           </li>
+          <li class="nav-item">
+            <a class="nav-link {% if request.path == '/graph' %}active{% endif %}" href="/graph">
+              <i class="fas fa-project-diagram"></i> Knowledge Graph
+            </a>
+          </li>
           {% if session.get('username') %}
           <li class="nav-item d-flex align-items-center ms-lg-3 my-2 my-lg-0">
             <span class="badge bg-secondary me-2 py-2 px-3">

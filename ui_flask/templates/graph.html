@@ -1,0 +1,296 @@
+{% extends "base.html" %}
+{% block title %}Knowledge Graph - AI RAG Chatbot{% endblock %}
+
+{% block extra_css %}
+<style>
+  #networkCanvas {
+    width: 100%;
+    height: 600px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    background-color: #f8fafc;
+  }
+  .legend-dot {
+    width: 12px;
+    height: 12px;
+    display: inline-block;
+    border-radius: 50%;
+    margin-right: 6px;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid px-4">
+  <!-- Header -->
+  <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <div>
+      <h3 class="mb-0"><i class="fas fa-project-diagram text-primary me-2"></i>Document Knowledge Graph (Graph RAG)</h3>
+      <small class="text-muted">Entity-relationship network mapping connections across ingested documents</small>
+    </div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-outline-primary btn-sm" onclick="fitGraph()" title="Center graph">
+        <i class="fas fa-compress-arrows-alt me-1"></i> Center View
+      </button>
+      <button class="btn btn-outline-secondary btn-sm" onclick="loadGraphData()" title="Reload graph">
+        <i class="fas fa-sync-alt me-1"></i> Reload Graph
+      </button>
+    </div>
+  </div>
+
+  <!-- Metric Overview Cards -->
+  <div class="row g-3 mb-4">
+    <div class="col-md-3 col-sm-6">
+      <div class="card shadow-sm border-0 bg-primary text-white">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <div class="text-uppercase small fw-bold opacity-75">Total Nodes</div>
+              <h3 id="statTotalNodes" class="mb-0 fw-bold">...</h3>
+            </div>
+            <i class="fas fa-circle-nodes fa-2x opacity-50"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-3 col-sm-6">
+      <div class="card shadow-sm border-0 bg-info text-white">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <div class="text-uppercase small fw-bold opacity-75">Documents</div>
+              <h3 id="statDocuments" class="mb-0 fw-bold">...</h3>
+            </div>
+            <i class="fas fa-file-pdf fa-2x opacity-50"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-3 col-sm-6">
+      <div class="card shadow-sm border-0 bg-success text-white">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <div class="text-uppercase small fw-bold opacity-75">Key Entities</div>
+              <h3 id="statEntities" class="mb-0 fw-bold">...</h3>
+            </div>
+            <i class="fas fa-tags fa-2x opacity-50"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-3 col-sm-6">
+      <div class="card shadow-sm border-0 bg-secondary text-white">
+        <div class="card-body">
+          <div class="d-flex justify-content-between align-items-center">
+            <div>
+              <div class="text-uppercase small fw-bold opacity-75">Relationships</div>
+              <h3 id="statEdges" class="mb-0 fw-bold">...</h3>
+            </div>
+            <i class="fas fa-share-alt fa-2x opacity-50"></i>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Interactive Network Canvas & Details Panel -->
+  <div class="row g-3 mb-4">
+    <div class="col-lg-9">
+      <div class="card shadow-sm border-0">
+        <div class="card-header bg-light d-flex justify-content-between align-items-center flex-wrap gap-2">
+          <div class="d-flex align-items-center gap-3">
+            <span class="small fw-semibold"><i class="fas fa-network-wired me-1 text-primary"></i> Graph Visualizer</span>
+            <div class="d-flex align-items-center small text-muted gap-3">
+              <span><span class="legend-dot" style="background-color: #0d6efd;"></span> Documents</span>
+              <span><span class="legend-dot" style="background-color: #198754;"></span> Entities</span>
+              <span><span class="legend-dot" style="background-color: #ffc107;"></span> System / Cache</span>
+            </div>
+          </div>
+          <div style="max-width: 250px;">
+            <input type="text" id="nodeSearchInput" class="form-control form-control-sm" placeholder="🔍 Search entity or doc..." onkeyup="filterGraphNodes()" />
+          </div>
+        </div>
+        <div class="card-body p-2 position-relative">
+          <div id="graphLoader" class="position-absolute top-50 start-50 translate-middle text-center" style="z-index: 10;">
+            <div class="spinner-border text-primary" role="status">
+              <span class="visually-hidden">Loading graph...</span>
+            </div>
+            <p class="small text-muted mt-2">Constructing Knowledge Graph...</p>
+          </div>
+          <div id="networkCanvas"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Node Details Inspector -->
+    <div class="col-lg-3">
+      <div class="card shadow-sm border-0 h-100">
+        <div class="card-header bg-light">
+          <h6 class="card-title mb-0"><i class="fas fa-info-circle me-1 text-primary"></i> Node Inspector</h6>
+        </div>
+        <div class="card-body" id="inspectorContent">
+          <div class="text-center py-5 text-muted">
+            <i class="fas fa-mouse-pointer fa-2x mb-2 text-secondary opacity-50"></i>
+            <p class="small mb-0">Click any node in the graph to inspect connected documents and relations.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<!-- Vis.js Standalone Network Visualizer -->
+<script src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+
+<script>
+let networkInstance = null;
+let graphDataCache = null;
+
+function loadGraphData() {
+  const loader = document.getElementById('graphLoader');
+  if (loader) loader.style.display = 'block';
+
+  fetch('/api/graph')
+    .then(res => res.json())
+    .then(data => {
+      if (loader) loader.style.display = 'none';
+      if (!data || !data.nodes) return;
+
+      graphDataCache = data;
+
+      // Update Metric Cards
+      document.getElementById('statTotalNodes').textContent = data.stats?.total_nodes || data.nodes.length;
+      document.getElementById('statDocuments').textContent = data.stats?.documents || 0;
+      document.getElementById('statEntities').textContent = data.stats?.entities || 0;
+      document.getElementById('statEdges').textContent = data.stats?.total_edges || data.edges.length;
+
+      // Render Graph
+      renderNetwork(data.nodes, data.edges);
+    })
+    .catch(err => {
+      if (loader) loader.style.display = 'none';
+      console.error("Failed to load graph data:", err);
+    });
+}
+
+function renderNetwork(nodesArray, edgesArray) {
+  const container = document.getElementById('networkCanvas');
+  const nodes = new vis.DataSet(nodesArray);
+  const edges = new vis.DataSet(edgesArray);
+
+  const data = { nodes: nodes, edges: edges };
+
+  const options = {
+    nodes: {
+      font: { size: 14, face: 'system-ui', color: '#1e293b' },
+      borderWidth: 2,
+      shadow: true
+    },
+    edges: {
+      width: 1.5,
+      smooth: { type: 'continuous' },
+      font: { size: 11, align: 'middle', color: '#64748b' },
+      arrows: { to: { enabled: true, scaleFactor: 0.6 } }
+    },
+    physics: {
+      stabilization: { iterations: 100 },
+      barnesHut: {
+        gravitationalConstant: -3000,
+        springConstant: 0.04,
+        springLength: 120
+      }
+    },
+    interaction: {
+      hover: true,
+      tooltipDelay: 150,
+      zoomView: true,
+      dragView: true
+    }
+  };
+
+  if (networkInstance) {
+    networkInstance.destroy();
+  }
+
+  networkInstance = new vis.Network(container, data, options);
+
+  // Click event listener
+  networkInstance.on("click", function(params) {
+    if (params.nodes.length > 0) {
+      const selectedId = params.nodes[0];
+      const clickedNode = nodesArray.find(n => n.id === selectedId);
+      const connectedEdges = edgesArray.filter(e => e.from === selectedId || e.to === selectedId);
+      renderInspector(clickedNode, connectedEdges, nodesArray);
+    }
+  });
+}
+
+function renderInspector(node, connectedEdges, allNodes) {
+  const inspector = document.getElementById('inspectorContent');
+  if (!node || !inspector) return;
+
+  const connectedList = connectedEdges.map(edge => {
+    const isOut = edge.from === node.id;
+    const targetId = isOut ? edge.to : edge.from;
+    const targetNode = allNodes.find(n => n.id === targetId);
+    const targetLabel = targetNode ? targetNode.label : targetId;
+    return `
+      <li class="list-group-item d-flex justify-content-between align-items-center py-2 px-1 small">
+        <span><i class="fas ${isOut ? 'fa-arrow-right text-success' : 'fa-arrow-left text-info'} me-1"></i> ${escapeHtml(targetLabel)}</span>
+        <span class="badge bg-light text-secondary border">${escapeHtml(edge.label || 'connected')}</span>
+      </li>
+    `;
+  }).join('');
+
+  inspector.innerHTML = `
+    <div>
+      <div class="d-flex align-items-center gap-2 mb-2">
+        <span class="badge ${node.group === 'document' ? 'bg-primary' : 'bg-success'}">${node.group ? node.group.toUpperCase() : 'NODE'}</span>
+        <h6 class="mb-0 fw-bold text-break">${escapeHtml(node.label)}</h6>
+      </div>
+      <p class="small text-muted mb-3">${escapeHtml(node.title || '')}</p>
+      
+      <div class="fw-semibold small mb-2"><i class="fas fa-project-diagram me-1 text-secondary"></i> Connected Relationships (${connectedEdges.length}):</div>
+      ${connectedEdges.length > 0 ? `<ul class="list-group list-group-flush mb-0">${connectedList}</ul>` : '<p class="small text-muted">No external relations.</p>'}
+    </div>
+  `;
+}
+
+function filterGraphNodes() {
+  const query = document.getElementById('nodeSearchInput').value.trim().toLowerCase();
+  if (!graphDataCache) return;
+
+  if (!query) {
+    renderNetwork(graphDataCache.nodes, graphDataCache.edges);
+    return;
+  }
+
+  const filteredNodes = graphDataCache.nodes.filter(n => n.label.toLowerCase().includes(query));
+  const nodeIds = new Set(filteredNodes.map(n => n.id));
+  const filteredEdges = graphDataCache.edges.filter(e => nodeIds.has(e.from) && nodeIds.has(e.to));
+
+  renderNetwork(filteredNodes, filteredEdges);
+}
+
+function fitGraph() {
+  if (networkInstance) {
+    networkInstance.fit({ animation: { duration: 600, easingFunction: 'easeInOutQuad' } });
+  }
+}
+
+function escapeHtml(text) {
+  if (!text) return '';
+  const div = document.createElement('div');
+  div.innerText = text;
+  return div.innerHTML;
+}
+
+document.addEventListener('DOMContentLoaded', loadGraphData);
+</script>
+{% endblock %}
