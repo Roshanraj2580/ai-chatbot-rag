@@ -62,31 +62,32 @@ Two decoupled services talk over HTTP, separating presentation from the core RAG
 
 ---
 
-### 2. Dual-Engine Redis Acceleration & Caching
+### 2. Dual-Engine Tenant-Safe Redis Acceleration & Caching
 
 ```
-User Query
+User Query (from Authenticated Session)
     │
     ▼
-Cache Key Generated: hash(query + filter_doc)
+Tenant-Isolated Cache Key: "rag:query:user:{user_id}:{hash(query + filter_doc)}"
     │
     ├──▶ Cache HIT? (Upstash Redis or In-Memory)
     │       │
     │       └──▶ Return cached answer immediately (<5ms latency, $0.00 API cost)
+    │            (Guaranteed: User A's cache is NEVER accessible to User B)
     │
     └──▶ Cache MISS?
             │
             ▼
-         Execute Hybrid Retrieval (ChromaDB + BM25)
+         Execute Hybrid Retrieval scoped to user_id (ChromaDB + BM25)
             │
             ▼
          Generate Answer via Gemini 3.8 Flash (~1,400ms)
             │
             ▼
-         Store result in Redis (TTL: 24h) + Log Telemetry to SQLite
+         Store result in Redis with user partition (TTL: 2h) + Log Telemetry to SQLite
 ```
 
-**Talking point for interviewer:** *"In production GenAI applications, repeated queries from users create unnecessary latency and financial cost. I implemented a dual-engine caching layer using Upstash Cloud Redis with an automatic in-memory fallback. Cache hits return in under 5 milliseconds with zero API token spend. When a user uploads a new PDF or deletes an old one, the cache is automatically invalidated to guarantee data freshness."*
+**Talking point for interviewer:** *"In production multi-user GenAI applications, naive caching creates a severe security flaw: User B could receive cached answers containing User A's confidential documents. I solved this by implementing tenant-scoped deterministic cache keys partitioned by `user_id` (`rag:query:user:<id>:...`). Cache hits return in under 5 milliseconds with zero LLM token cost, and clearing or updating documents for User A never impacts User B's cache."*
 
 ---
 
