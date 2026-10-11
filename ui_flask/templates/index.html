@@ -1,146 +1,137 @@
-{% extends "base.html" %} {% block title %}Home - AI RAG Chatbot{% endblock 
-%} {% block content %}
+{% extends "base.html" %} 
+{% block title %}AI RAG Assistant - Document Intelligence Platform{% endblock %} 
+
+{% block content %}
 <div class="row justify-content-center">
-  <div class="col-lg-10">
-    <div class="text-center mb-5">
-      <h1 class="display-4 mb-3">
-        AI RAG Chatbot
-      </h1>
-      <p class="lead text-muted">
-       AI-powered document assistant built with Gemini 2.5 Flash, Gemini Embeddings, ChromaDB, and FastAPI.
-      </p>
+  <div class="col-lg-11 col-xl-10">
+
+    <!-- Hero Section -->
+    <div class="hero-banner p-4 p-md-5 mb-5 rounded-4 shadow-sm text-center position-relative overflow-hidden">
+      <div class="position-relative z-1">
+        <span class="badge bg-primary-subtle text-primary border border-primary-subtle px-3 py-2 rounded-pill fw-semibold mb-3">
+          <i class="fas fa-sparkles me-1 text-warning"></i> Enterprise Multi-Tenant RAG
+        </span>
+        <h1 class="hero-title fw-bolder mb-3">
+          Conversational Document Intelligence
+        </h1>
+        <p class="hero-subtitle text-muted mx-auto mb-4" style="max-width: 650px;">
+          Upload documents into your private, encrypted workspace. Query complex PDFs with grounded citations, semantic search, and sub-millisecond response caching.
+        </p>
+        <div class="d-flex flex-wrap justify-content-center gap-3">
+          <a href="/chat" class="btn btn-primary btn-lg px-4 py-2 rounded-pill shadow-sm fw-semibold">
+            <i class="fas fa-comments me-2"></i> Start Querying
+          </a>
+          <a href="/upload" class="btn btn-outline-dark btn-lg px-4 py-2 rounded-pill fw-semibold">
+            <i class="fas fa-cloud-upload-alt me-2 text-primary"></i> Upload Documents
+          </a>
+        </div>
+      </div>
     </div>
 
-    <!-- Feature Cards -->
+    <!-- Quick Action Feature Cards -->
     <div class="row g-4 mb-5">
       <!-- Chat Feature -->
       <div class="col-md-6 col-lg-3">
-        <div class="card h-100 text-center hover-card">
-          <div class="card-body">
-            <i class="fas fa-comments fa-3x text-primary mb-3"></i>
-            <h5 class="card-title">Text Chat</h5>
-            <p class="card-text">
-              Ask questions and get AI-powered answers grounded in your
-              documents.
+        <div class="card h-100 modern-feature-card border-0 shadow-sm rounded-4 text-center p-3">
+          <div class="card-body d-flex flex-column">
+            <div class="icon-circle bg-primary-subtle text-primary mx-auto mb-3">
+              <i class="fas fa-comments fa-lg"></i>
+            </div>
+            <h5 class="fw-bold mb-2">Smart Chat</h5>
+            <p class="text-muted small flex-grow-1">
+              Ask questions and get answers grounded directly in your private documents.
             </p>
-            <a href="/chat" class="btn btn-primary">Start Chatting</a>
+            <a href="/chat" class="btn btn-sm btn-outline-primary rounded-pill mt-2 fw-semibold">Open Chat</a>
           </div>
         </div>
       </div>
 
       <!-- Voice Chat Feature -->
       <div class="col-md-6 col-lg-3">
-        <div class="card h-100 text-center hover-card">
-          <div class="card-body">
-            <i class="fas fa-microphone fa-3x text-success mb-3"></i>
-            <h5 class="card-title">Voice Chat</h5>
-            <p class="card-text">
-              Speak your questions and hear AI responses with natural voice
-              interaction
+        <div class="card h-100 modern-feature-card border-0 shadow-sm rounded-4 text-center p-3">
+          <div class="card-body d-flex flex-column">
+            <div class="icon-circle bg-success-subtle text-success mx-auto mb-3">
+              <i class="fas fa-microphone fa-lg"></i>
+            </div>
+            <h5 class="fw-bold mb-2">Voice Assistant</h5>
+            <p class="text-muted small flex-grow-1">
+              Hands-free conversation with real-time speech transcription and voice synthesis.
             </p>
-            <a href="/voice" class="btn btn-success">Try Voice Chat</a>
+            <a href="/voice" class="btn btn-sm btn-outline-success rounded-pill mt-2 fw-semibold">Launch Voice</a>
           </div>
         </div>
       </div>
 
       <!-- Upload Feature -->
       <div class="col-md-6 col-lg-3">
-        <div class="card h-100 text-center hover-card">
-          <div class="card-body">
-            <i class="fas fa-upload fa-3x text-warning mb-3"></i>
-            <h5 class="card-title">Upload Documents</h5>
-            <p class="card-text">
-             Upload PDF documents to build an intelligent AI knowledge base
+        <div class="card h-100 modern-feature-card border-0 shadow-sm rounded-4 text-center p-3">
+          <div class="card-body d-flex flex-column">
+            <div class="icon-circle bg-warning-subtle text-warning mx-auto mb-3">
+              <i class="fas fa-file-pdf fa-lg"></i>
+            </div>
+            <h5 class="fw-bold mb-2">Document Hub</h5>
+            <p class="text-muted small flex-grow-1">
+              Securely index PDF files into isolated vector and keyword search indices.
             </p>
-            <a href="/upload" class="btn btn-warning">Upload PDFs</a>
+            <a href="/upload" class="btn btn-sm btn-outline-warning rounded-pill mt-2 fw-semibold">Upload Files</a>
           </div>
         </div>
       </div>
 
-      <!-- Documents Feature -->
+      <!-- Knowledge Graph Feature -->
       <div class="col-md-6 col-lg-3">
-        <div class="card h-100 text-center hover-card">
-          <div class="card-body">
-            <i class="fas fa-folder-open fa-3x text-info mb-3"></i>
-            <h5 class="card-title">Document Library</h5>
-            <p class="card-text">
-              View, organize, and manage your uploaded document collection.
+        <div class="card h-100 modern-feature-card border-0 shadow-sm rounded-4 text-center p-3">
+          <div class="card-body d-flex flex-column">
+            <div class="icon-circle bg-info-subtle text-info mx-auto mb-3">
+              <i class="fas fa-project-diagram fa-lg"></i>
+            </div>
+            <h5 class="fw-bold mb-2">Knowledge Graph</h5>
+            <p class="text-muted small flex-grow-1">
+              Explore interconnected entities and conceptual relationships across your files.
             </p>
-            <a href="/documents" class="btn btn-info">View Library</a>
+            <a href="/graph" class="btn btn-sm btn-outline-info rounded-pill mt-2 fw-semibold">Explore Graph</a>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Key Features -->
-    <div class="card mb-4">
-      <div class="card-header bg-dark text-white">
-        <h5 class="mb-0"><i class="fas fa-star"></i> Key Features</h5>
+    <!-- Quick Workflow Strip -->
+    <div class="card border-0 shadow-sm rounded-4 p-4 mb-4 bg-white">
+      <div class="d-flex align-items-center mb-3">
+        <div class="badge bg-primary me-2 px-3 py-2 rounded-pill"><i class="fas fa-play"></i> Quick Start</div>
+        <h6 class="mb-0 fw-bold">How It Works</h6>
       </div>
-      <div class="card-body">
-        <div class="row">
-          <div class="col-md-6">
-            <ul class="list-unstyled">
-              <li class="mb-2">
-                <i class="fas fa-check-circle text-success"></i>
-                <strong>Gemini Embeddings:</strong> Cloud-powered semantic embeddings using Gemini
-              </li>
-              <li class="mb-2">
-                <i class="fas fa-check-circle text-success"></i>
-                <strong>Vector Search:</strong>  Lightning-fast semantic retrieval powered by ChromaDB.
-              </li>
-              <li class="mb-2">
-                <i class="fas fa-check-circle text-success"></i>
-                <strong>Gemini AI:</strong> Gemini 2.5 Flash for accurate document understanding
-              </li>
-            </ul>
+      <div class="row g-3 text-center text-md-start">
+        <div class="col-md-4">
+          <div class="d-flex align-items-start">
+            <span class="step-badge me-3">1</span>
+            <div>
+              <strong class="d-block text-dark">Upload Documents</strong>
+              <small class="text-muted">Upload any PDF file. It gets securely chunked and embedded into your private workspace.</small>
+            </div>
           </div>
-          <div class="col-md-6">
-            <ul class="list-unstyled">
-              <li class="mb-2">
-                <i class="fas fa-check-circle text-success"></i>
-                <strong>Voice Interface:</strong> Speech-to-text and
-                text-to-speech
-              </li>
-              <li class="mb-2">
-                <i class="fas fa-check-circle text-success"></i>
-                <strong>Citations:</strong> Every answer includes source
-                references
-              </li>
-              <li class="mb-2">
-                <i class="fas fa-check-circle text-success"></i>
-                <strong>Secure Processing:</strong> Documents are processed securely using Gemini APIs.
-              </li>
-            </ul>
+        </div>
+        <div class="col-md-4">
+          <div class="d-flex align-items-start">
+            <span class="step-badge me-3">2</span>
+            <div>
+              <strong class="d-block text-dark">Ask in Plain English</strong>
+              <small class="text-muted">Query specific documents or search across your entire document library.</small>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="d-flex align-items-start">
+            <span class="step-badge me-3">3</span>
+            <div>
+              <strong class="d-block text-dark">Get Verified Answers</strong>
+              <small class="text-muted">Responses include exact page citations, token accounting, and sub-5ms caching.</small>
+            </div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- Getting Started -->
-    <div class="card">
-      <div class="card-header bg-primary text-white">
-        <h5 class="mb-0"><i class="fas fa-rocket"></i> Getting Started</h5>
-      </div>
-      <div class="card-body">
-        <ol>
-          <li class="mb-2">
-            <strong>Upload Documents:</strong> Go to the Upload page and add
-            your PDF files
-          </li>
-          <li class="mb-2">
-            <strong>Wait for Processing:</strong> Your PDFs are indexed using Gemini Embeddings.
-          </li>
-          <li class="mb-2">
-            <strong>Start Asking:</strong> Use text or voice chat to ask
-            questions about your documents
-          </li>
-          <li class="mb-2">
-            <strong>Get Answers:</strong> Receive grounded AI responses with document citations.
-          </li>
-        </ol>
-      </div>
-    </div>
   </div>
 </div>
 {% endblock %}
