@@ -84,22 +84,26 @@ class ChromaClient:
     def query_similar(
         self,
         query_embedding: List[float],
-        k: int = 5
+        k: int = 5,
+        user_id: Optional[str] = None
     ) -> Dict[str, List]:
         """
-        Query for similar chunks using vector similarity.
+        Query for similar chunks using vector similarity with optional user isolation.
         
         Args:
             query_embedding: Query embedding vector
             k: Number of results to return (default: 5)
+            user_id: Optional user identifier to isolate results to this user
         
         Returns:
             Dict with keys: ids, documents, metadatas, distances
         """
         try:
+            where_filter = {"user_id": user_id} if user_id else None
             results = self.collection.query(
                 query_embeddings=[query_embedding],
-                n_results=k
+                n_results=k,
+                where=where_filter
             )
             
             # Flatten results (query returns list of lists)
@@ -114,19 +118,21 @@ class ChromaClient:
             logger.error(f"Query failed: {e}")
             raise
     
-    def get_documents_by_doc_id(self, doc_id: str) -> Dict[str, List]:
+    def get_documents_by_doc_id(self, doc_id: str, user_id: Optional[str] = None) -> Dict[str, List]:
         """
-        Get all chunks for a specific document.
+        Get all chunks for a specific document, optionally verifying user ownership.
         
         Args:
             doc_id: Document ID to filter by
+            user_id: Optional user ID to ensure ownership
         
         Returns:
             Dict with keys: ids, documents, metadatas
         """
         try:
+            where_filter = {"$and": [{"doc_id": doc_id}, {"user_id": user_id}]} if user_id else {"doc_id": doc_id}
             results = self.collection.get(
-                where={"doc_id": doc_id}
+                where=where_filter
             )
             return results
             
@@ -134,40 +140,45 @@ class ChromaClient:
             logger.error(f"Failed to get document {doc_id}: {e}")
             raise
     
-    def get_all_documents(self) -> Dict[str, List]:
+    def get_all_documents(self, user_id: Optional[str] = None) -> Dict[str, List]:
         """
-        Get all chunks from the collection.
+        Get all chunks from the collection, optionally scoped to a user.
+        
+        Args:
+            user_id: Optional user identifier to filter documents
         
         Returns:
             Dict with keys: ids, documents, metadatas
         """
         try:
-            # Get all with limit (Chroma default max)
-            results = self.collection.get()
+            where_filter = {"user_id": user_id} if user_id else None
+            results = self.collection.get(where=where_filter)
             return results
             
         except Exception as e:
             logger.error(f"Failed to get all documents: {e}")
             raise
     
-    def delete_document(self, doc_id: str) -> int:
+    def delete_document(self, doc_id: str, user_id: Optional[str] = None) -> int:
         """
-        Delete all chunks for a specific document.
+        Delete all chunks for a specific document, optionally enforcing user ownership.
         
         Args:
             doc_id: Document ID to delete
+            user_id: Optional user ID to ensure ownership
         
         Returns:
             Number of chunks deleted
         """
         try:
             # Get IDs first
-            results = self.collection.get(where={"doc_id": doc_id})
+            where_filter = {"$and": [{"doc_id": doc_id}, {"user_id": user_id}]} if user_id else {"doc_id": doc_id}
+            results = self.collection.get(where=where_filter)
             ids_to_delete = results["ids"]
             
             if ids_to_delete:
                 self.collection.delete(ids=ids_to_delete)
-                logger.info(f"Deleted {len(ids_to_delete)} chunks for doc_id: {doc_id}")
+                logger.info(f"Deleted {len(ids_to_delete)} chunks for doc_id: {doc_id} (user: {user_id})")
             
             return len(ids_to_delete)
             
@@ -175,8 +186,14 @@ class ChromaClient:
             logger.error(f"Failed to delete document {doc_id}: {e}")
             raise
     
-    def count(self) -> int:
-        """Get total number of chunks in collection."""
+    def count(self, user_id: Optional[str] = None) -> int:
+        """Get total number of chunks in collection, optionally for a user."""
+        if user_id:
+            try:
+                res = self.collection.get(where={"user_id": user_id})
+                return len(res.get("ids", []))
+            except Exception:
+                return 0
         return self.collection.count()
     
     def reset(self) -> None:

@@ -5,7 +5,7 @@ Uses Reciprocal Rank Fusion (RRF) to merge results from both methods.
 """
 import os
 import logging
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 from backend.retrieval.keyword_retriever import KeywordRetriever
 
@@ -94,19 +94,20 @@ class HybridRetriever:
         
         logger.info(f"HybridRetriever initialized: mode={self.mode}, rrf_k={RRF_K}")
     
-    def _semantic_search(self, query: str, k: int) -> List[Dict[str, Any]]:
+    def _semantic_search(self, query: str, k: int, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        Perform semantic (vector) search.
+        Perform semantic (vector) search with optional user isolation.
         
         Args:
             query: Search query
             k: Number of results
+            user_id: Optional user ID for isolation
         
         Returns:
             List of result dicts
         """
         query_embedding = self.embedder.encode([query], task_type="retrieval_query")[0].tolist()
-        results = self.chroma_client.query_similar(query_embedding, k=k)
+        results = self.chroma_client.query_similar(query_embedding, k=k, user_id=user_id)
         
         if not results["ids"]:
             return []
@@ -121,26 +122,28 @@ class HybridRetriever:
             for i in range(len(results["ids"]))
         ]
     
-    def _keyword_search(self, query: str, k: int) -> List[Dict[str, Any]]:
+    def _keyword_search(self, query: str, k: int, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        Perform keyword (BM25) search.
+        Perform keyword (BM25) search with optional user isolation.
         
         Args:
             query: Search query
             k: Number of results
+            user_id: Optional user ID for isolation
         
         Returns:
             List of result dicts
         """
-        return self.keyword_retriever.search(query, k=k)
+        return self.keyword_retriever.search(query, k=k, user_id=user_id)
     
-    def search(self, query: str, k: int = 10) -> List[Dict[str, Any]]:
+    def search(self, query: str, k: int = 10, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        Search using configured mode with automatic fallback.
+        Search using configured mode with automatic fallback and user isolation.
         
         Args:
             query: Search query
             k: Number of results to return
+            user_id: Optional user ID for isolation
         
         Returns:
             List of retrieved chunks
@@ -148,14 +151,14 @@ class HybridRetriever:
         try:
             if self.mode == "semantic":
                 logger.debug("Using semantic-only search")
-                return self._semantic_search(query, k)
+                return self._semantic_search(query, k, user_id=user_id)
             
             elif self.mode == "keyword":
                 logger.debug("Using keyword-only search with semantic fallback")
-                results = self._keyword_search(query, k)
+                results = self._keyword_search(query, k, user_id=user_id)
                 if not results:
                     logger.info("Keyword search returned no results, falling back to semantic")
-                    return self._semantic_search(query, k)
+                    return self._semantic_search(query, k, user_id=user_id)
                 return results
             
             elif self.mode == "hybrid":
@@ -164,8 +167,8 @@ class HybridRetriever:
                 # Fetch more for each to allow RRF to work effectively
                 fetch_k = k * 2
                 
-                semantic_results = self._semantic_search(query, fetch_k)
-                keyword_results = self._keyword_search(query, fetch_k)
+                semantic_results = self._semantic_search(query, fetch_k, user_id=user_id)
+                keyword_results = self._keyword_search(query, fetch_k, user_id=user_id)
                 
                 if not semantic_results and not keyword_results:
                     logger.warning("Both semantic and keyword search returned empty")
@@ -192,7 +195,7 @@ class HybridRetriever:
             else:
                 # Fallback for unknown mode
                 logger.warning(f"Unknown mode '{self.mode}', using semantic")
-                return self._semantic_search(query, k)
+                return self._semantic_search(query, k, user_id=user_id)
         
         except Exception as e:
             logger.error(f"Search failed in '{self.mode}' mode: {e}")
@@ -201,7 +204,7 @@ class HybridRetriever:
             if self.mode != "semantic":
                 logger.info("Falling back to semantic search due to error")
                 try:
-                    return self._semantic_search(query, k)
+                    return self._semantic_search(query, k, user_id=user_id)
                 except Exception as fallback_error:
                     logger.error(f"Semantic fallback also failed: {fallback_error}")
                     raise
@@ -212,13 +215,14 @@ class HybridRetriever:
         """Invalidate BM25 index (call after document changes)."""
         self.keyword_retriever.invalidate_index()
     
-    def search_with_stats(self, query: str, k: int = 10) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    def search_with_stats(self, query: str, k: int = 10, user_id: Optional[str] = None) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
         """
-        Search with statistics for UI display.
+        Search with statistics for UI display and user isolation.
         
         Args:
             query: Search query
             k: Number of results to return
+            user_id: Optional user ID for isolation
         
         Returns:
             Tuple of (results, stats) where stats contains:
@@ -236,18 +240,18 @@ class HybridRetriever:
         
         try:
             if self.mode == "semantic":
-                results = self._semantic_search(query, k)
+                results = self._semantic_search(query, k, user_id=user_id)
                 stats["semantic_count"] = len(results)
                 stats["total_retrieved"] = len(results)
                 return results, stats
             
             elif self.mode == "keyword":
-                results = self._keyword_search(query, k)
+                results = self._keyword_search(query, k, user_id=user_id)
                 stats["keyword_count"] = len(results)
                 
                 if not results:
                     logger.info("Keyword search returned no results, falling back to semantic")
-                    results = self._semantic_search(query, k)
+                    results = self._semantic_search(query, k, user_id=user_id)
                     stats["semantic_count"] = len(results)
                     stats["mode"] = "semantic (fallback)"
                 
@@ -257,8 +261,8 @@ class HybridRetriever:
             elif self.mode == "hybrid":
                 fetch_k = k * 2
                 
-                semantic_results = self._semantic_search(query, fetch_k)
-                keyword_results = self._keyword_search(query, fetch_k)
+                semantic_results = self._semantic_search(query, fetch_k, user_id=user_id)
+                keyword_results = self._keyword_search(query, fetch_k, user_id=user_id)
                 
                 stats["semantic_count"] = len(semantic_results)
                 stats["keyword_count"] = len(keyword_results)
@@ -286,7 +290,7 @@ class HybridRetriever:
                 return fused[:k], stats
             
             else:
-                results = self._semantic_search(query, k)
+                results = self._semantic_search(query, k, user_id=user_id)
                 stats["semantic_count"] = len(results)
                 stats["total_retrieved"] = len(results)
                 return results, stats
@@ -297,7 +301,7 @@ class HybridRetriever:
             if self.mode != "semantic":
                 logger.info("Falling back to semantic search due to error")
                 try:
-                    results = self._semantic_search(query, k)
+                    results = self._semantic_search(query, k, user_id=user_id)
                     stats["semantic_count"] = len(results)
                     stats["total_retrieved"] = len(results)
                     stats["mode"] = "semantic (fallback)"

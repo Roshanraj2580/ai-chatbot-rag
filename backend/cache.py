@@ -46,15 +46,16 @@ class QueryCache:
         else:
             logger.info("REDIS_URL not configured. Using fast in-memory query cache.")
 
-    def _normalize_key(self, query: str, k: int = 5) -> str:
-        """Create a deterministic cache key from normalized query text."""
+    def _normalize_key(self, query: str, k: int = 5, user_id: Optional[str] = None) -> str:
+        """Create a deterministic cache key from normalized query text and optional user_id."""
         normalized = query.strip().lower().rstrip("?!., ")
-        hash_digest = hashlib.sha256(f"{normalized}:k={k}".encode("utf-8")).hexdigest()[:16]
-        return f"rag:query:{hash_digest}"
+        tenant_prefix = f"user:{user_id}:" if user_id else "global:"
+        hash_digest = hashlib.sha256(f"{tenant_prefix}{normalized}:k={k}".encode("utf-8")).hexdigest()[:16]
+        return f"rag:query:{tenant_prefix}{hash_digest}"
 
-    def get(self, query: str, k: int = 5) -> Optional[Dict[str, Any]]:
-        """Retrieve cached query response if available."""
-        key = self._normalize_key(query, k)
+    def get(self, query: str, k: int = 5, user_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        """Retrieve cached query response if available for the specific user."""
+        key = self._normalize_key(query, k, user_id=user_id)
 
         # 1. Try Redis
         if self.redis_client:
@@ -83,9 +84,9 @@ class QueryCache:
         self.misses += 1
         return None
 
-    def set(self, query: str, data: Dict[str, Any], k: int = 5, ttl: int = DEFAULT_CACHE_TTL) -> None:
-        """Store query response in cache with TTL."""
-        key = self._normalize_key(query, k)
+    def set(self, query: str, data: Dict[str, Any], k: int = 5, ttl: int = DEFAULT_CACHE_TTL, user_id: Optional[str] = None) -> None:
+        """Store query response in cache with TTL scoped by user."""
+        key = self._normalize_key(query, k, user_id=user_id)
 
         # 1. Save to Redis if available
         if self.redis_client:
@@ -102,18 +103,32 @@ class QueryCache:
             "expires_at": time.time() + ttl
         }
 
-    def clear(self) -> None:
-        """Clear all cached query responses."""
-        if self.redis_client:
-            try:
-                keys = self.redis_client.keys("rag:query:*")
-                if keys:
-                    self.redis_client.delete(*keys)
-            except Exception as e:
-                logger.warning(f"Redis clear failed: {e}")
-        self.memory_store.clear()
-        self.hits = 0
-        self.misses = 0
+    def clear(self, user_id: Optional[str] = None) -> None:
+        """Clear cached query responses for a specific user, or all if user_id is None."""
+        if user_id:
+            tenant_pattern = f"rag:query:user:{user_id}:*"
+            if self.redis_client:
+                try:
+                    keys = self.redis_client.keys(tenant_pattern)
+                    if keys:
+                        self.redis_client.delete(*keys)
+                except Exception as e:
+                    logger.warning(f"Redis clear for user {user_id} failed: {e}")
+            # Clear in-memory matching tenant
+            to_delete = [k for k in self.memory_store if f"user:{user_id}:" in k]
+            for k in to_delete:
+                del self.memory_store[k]
+        else:
+            if self.redis_client:
+                try:
+                    keys = self.redis_client.keys("rag:query:*")
+                    if keys:
+                        self.redis_client.delete(*keys)
+                except Exception as e:
+                    logger.warning(f"Redis clear failed: {e}")
+            self.memory_store.clear()
+            self.hits = 0
+            self.misses = 0
 
     def get_stats(self) -> Dict[str, Any]:
         """Return cache statistics for MLOps monitoring."""

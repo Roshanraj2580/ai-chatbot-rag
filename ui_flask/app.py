@@ -63,9 +63,16 @@ def allowed_file(filename):
 
 
 def call_backend(endpoint, method="GET", **kwargs):
-    """Helper to call FastAPI backend."""
+    """Helper to call FastAPI backend, forwarding user session for tenant isolation."""
     url = f"{BACKEND_URL}{endpoint}"
     timeout = kwargs.pop("timeout", 120)
+    
+    # Automatically inject X-User-Id header from session if logged in
+    headers = kwargs.pop("headers", {})
+    if "user_id" in session and "X-User-Id" not in headers:
+        headers["X-User-Id"] = str(session["user_id"])
+    kwargs["headers"] = headers
+
     try:
         if method == "GET":
             response = requests.get(url, timeout=timeout, **kwargs)
@@ -330,6 +337,7 @@ def feedback():
 
 
 @app.route("/api/upload", methods=["POST"])
+@login_required
 def upload_file():
     """Upload a PDF document."""
     if "file" not in request.files:
@@ -349,7 +357,7 @@ def upload_file():
     file.save(filepath)
     
     try:
-        # Upload to backend
+        # Upload to backend (X-User-Id automatically attached by call_backend)
         with open(filepath, "rb") as f:
             files = {"file": (filename, f, "application/pdf")}
             result = call_backend("/documents", method="POST", files=files)
@@ -366,22 +374,25 @@ def upload_file():
 
 
 @app.route("/api/documents", methods=["GET"])
+@login_required
 def get_documents():
-    """Get list of documents."""
+    """Get list of documents belonging to the authenticated user."""
     result = call_backend("/documents")
     return jsonify(result)
 
 
 @app.route("/api/documents/<doc_id>", methods=["GET"])
+@login_required
 def get_document(doc_id):
-    """Get specific document details."""
+    """Get specific document details for the authenticated user."""
     result = call_backend(f"/documents/{doc_id}")
     return jsonify(result)
 
 
 @app.route("/api/documents/<doc_id>", methods=["DELETE"])
+@login_required
 def delete_document(doc_id):
-    """Delete a document."""
+    """Delete a document belonging to the authenticated user."""
     result = call_backend(f"/documents/{doc_id}", method="DELETE")
     return jsonify(result)
 

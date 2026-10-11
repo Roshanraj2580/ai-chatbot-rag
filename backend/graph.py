@@ -6,7 +6,7 @@ enabling multi-hop relational retrieval and visual graph exploration.
 
 import re
 import logging
-from typing import Dict, List, Any, Set, Tuple
+from typing import Dict, List, Any, Set, Tuple, Optional
 from collections import Counter, defaultdict
 
 logger = logging.getLogger(__name__)
@@ -56,9 +56,10 @@ def extract_entities_from_text(text: str, max_entities: int = 15) -> List[str]:
     return [item[0] for item in counts.most_common(max_entities)]
 
 
-def build_knowledge_graph(chroma_client) -> Dict[str, Any]:
+def build_knowledge_graph(chroma_client, user_id: Optional[str] = None) -> Dict[str, Any]:
     """
     Build a complete Node-and-Edge Knowledge Graph from vector store document chunks.
+    Optionally scoped to a specific user.
     
     Returns:
         Dict with nodes, edges, and summary graph statistics.
@@ -67,7 +68,7 @@ def build_knowledge_graph(chroma_client) -> Dict[str, Any]:
         return {"nodes": [], "edges": [], "stats": {"total_nodes": 0, "total_edges": 0, "documents": 0, "entities": 0}}
 
     try:
-        data = chroma_client.get_all_documents()
+        data = chroma_client.get_all_documents(user_id=user_id)
     except Exception as e:
         logger.error(f"Failed to fetch documents for Knowledge Graph: {e}")
         return {"nodes": [], "edges": [], "stats": {"total_nodes": 0, "total_edges": 0, "documents": 0, "entities": 0}}

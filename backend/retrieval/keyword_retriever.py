@@ -108,13 +108,14 @@ class KeywordRetriever:
         
         return self._bm25 is not None
     
-    def search(self, query: str, k: int = 10) -> List[Dict[str, Any]]:
+    def search(self, query: str, k: int = 10, user_id: Optional[str] = None) -> List[Dict[str, Any]]:
         """
-        Search using BM25 keyword matching.
+        Search using BM25 keyword matching with optional user isolation.
         
         Args:
             query: Search query
             k: Number of results to return
+            user_id: Optional user ID to isolate search results
         
         Returns:
             List of document dicts with 'id', 'document', 'metadata', 'score'
@@ -131,20 +132,34 @@ class KeywordRetriever:
         
         scores = self._bm25.get_scores(tokenized_query)
         
-        # Get top-k indices sorted by score
-        top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:k]
+        # Sort indices by score descending
+        sorted_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)
         
+        # Find results that have matching tokens or positive scores
         results = []
-        for idx in top_indices:
-            if scores[idx] > 0:  # Only include positive scores
-                results.append({
-                    "id": self._corpus[idx]["id"],
-                    "document": self._corpus[idx]["document"],
-                    "metadata": self._corpus[idx]["metadata"],
-                    "score": float(scores[idx])
-                })
+        token_set = set(tokenized_query)
+        for idx in sorted_indices:
+            # Document must share at least one keyword token with the query
+            doc_tokens = set(self._tokenized_corpus[idx])
+            has_matching_token = bool(token_set & doc_tokens)
+            if not has_matching_token and scores[idx] <= 0:
+                continue
+            meta = self._corpus[idx]["metadata"] or {}
+            # If user_id is provided, only return chunks belonging to this user
+            if user_id:
+                chunk_user = meta.get("user_id")
+                if str(chunk_user) != str(user_id):
+                    continue
+            results.append({
+                "id": self._corpus[idx]["id"],
+                "document": self._corpus[idx]["document"],
+                "metadata": meta,
+                "score": float(scores[idx])
+            })
+            if len(results) >= k:
+                break
         
-        logger.debug(f"BM25 search returned {len(results)} results for '{query[:50]}...'")
+        logger.debug(f"BM25 search returned {len(results)} results for '{query[:50]}...' (user: {user_id})")
         return results
     
     def invalidate_index(self) -> None:

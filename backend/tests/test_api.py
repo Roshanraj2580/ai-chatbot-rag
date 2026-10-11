@@ -148,5 +148,5 @@ def test_ask_query_empty_db(mock_chroma):
     response = client.post("/ask", json={"query": "test"})
     assert response.status_code == 200
     data = response.json()
-    assert data["answer"] == "I don't know."
+    assert "Please upload some documents first" in data["answer"]
     assert len(data["retrieved_chunks"]) == 0

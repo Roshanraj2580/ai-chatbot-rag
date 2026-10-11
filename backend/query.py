@@ -189,7 +189,13 @@ class QueryService:
             f"retrieval_mode={self.retriever.mode}, cache={self.cache.backend_type}"
         )
     
-    def answer_query(self, query: str, k: Optional[int] = None, filter_doc: Optional[str] = None) -> Dict[str, Any]:
+    def answer_query(
+        self,
+        query: str,
+        k: Optional[int] = None,
+        filter_doc: Optional[str] = None,
+        user_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """
         Complete query pipeline: hybrid retrieve → deduplicate → prompt → LLM.
         
@@ -197,6 +203,7 @@ class QueryService:
             query: User question
             k: Number of chunks to retrieve (default: RETRIEVAL_K env var or 5)
             filter_doc: Optional source_filename to scope search to a specific document
+            user_id: Optional user ID to isolate search and cache to this user
         
         Returns:
             Dict with answer, citations, chunks, token usage, and cost estimates.
@@ -217,16 +224,16 @@ class QueryService:
 
         # 1. Fast Cache Check (Redis / In-Memory): drops latency from ~1500ms to <5ms
         cache_query_id = f"{query}:doc={filter_doc or 'all'}"
-        cached_result = self.cache.get(cache_query_id, k=k)
+        cached_result = self.cache.get(cache_query_id, k=k, user_id=user_id)
         if cached_result:
-            logger.info(f"⚡ Cache HIT for query: '{query[:50]}' (served in <5ms)")
+            logger.info(f"⚡ Cache HIT for query: '{query[:50]}' (user={user_id}, served in <5ms)")
             return cached_result
 
-        logger.info(f"Processing query (Cache MISS): '{query[:80]}...', filter_doc={filter_doc}")
+        logger.info(f"Processing query (Cache MISS): '{query[:80]}...', filter_doc={filter_doc}, user_id={user_id}")
         
         # Use HybridRetriever with stats (handles semantic, keyword, or hybrid)
         fetch_k = min(k * 4, 60) if filter_doc else min(k * 2, 50)
-        retrieved_chunks, search_stats = self.retriever.search_with_stats(query, k=fetch_k)
+        retrieved_chunks, search_stats = self.retriever.search_with_stats(query, k=fetch_k, user_id=user_id)
         
         # Apply document filter if scoped to a specific document
         if filter_doc:
@@ -337,8 +344,8 @@ class QueryService:
             "target_doc": filter_doc or ""
         }
         
-        # Store in Redis/memory cache
-        self.cache.set(cache_query_id, result, k=k)
+        # Store in Redis/memory cache scoped to user
+        self.cache.set(cache_query_id, result, k=k, user_id=user_id)
         
         return result
 

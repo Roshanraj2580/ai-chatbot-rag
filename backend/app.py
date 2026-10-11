@@ -7,7 +7,7 @@ import tempfile
 from typing import List, Optional
 from datetime import datetime
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Header, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -84,6 +84,7 @@ class QueryRequest(BaseModel):
     """Request model for query endpoint."""
     query: str = Field(..., min_length=1, description="User question")
     filter_doc: Optional[str] = Field(None, description="Optional document filename to scope query")
+    user_id: Optional[str] = Field(None, description="Optional user identifier for tenant isolation")
 
 
 class Citation(BaseModel):
@@ -195,12 +196,16 @@ async def get_config():
 
 
 @app.post("/documents", response_model=IngestResponse, status_code=201)
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(
+    file: UploadFile = File(...),
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id")
+):
     """
-    Upload and ingest a PDF document.
+    Upload and ingest a PDF document with tenant isolation.
     
     Args:
         file: PDF file (multipart/form-data)
+        x_user_id: Optional user identifier from request header
     
     Returns:
         IngestResponse with doc_id, status, chunks, and failed_pages
@@ -211,7 +216,7 @@ async def upload_document(file: UploadFile = File(...)):
     if not file.filename.lower().endswith('.pdf'):
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
-    logger.info(f"Received upload: {file.filename}")
+    logger.info(f"Received upload: {file.filename} (user: {x_user_id})")
 
     # Save to temporary file
     try:
@@ -221,21 +226,19 @@ async def upload_document(file: UploadFile = File(...)):
             tmp_path = tmp_file.name
 
         # Process PDF
-        
-
         if ingestor is None:
             ingestor = get_ingestor()
 
         logger.info("Calling process_pdf...")
-        result = ingestor.process_pdf(tmp_path, file.filename)
+        result = ingestor.process_pdf(tmp_path, file.filename, user_id=x_user_id)
         logger.info("process_pdf finished")
 
         # Clean up temp file
         os.unlink(tmp_path)
 
-        # Invalidate query cache for fresh document retrieval
-        get_cache().clear()
-        logger.info("Invalidated query cache after document upload")
+        # Invalidate query cache for fresh document retrieval (scoped to user)
+        get_cache().clear(user_id=x_user_id)
+        logger.info(f"Invalidated query cache after document upload (user: {x_user_id})")
 
         return IngestResponse(**result)
 
@@ -313,16 +316,16 @@ async def upload_documents_batch(files: List[UploadFile] = File(...)):
 
 
 @app.get("/documents", response_model=List[DocumentInfo])
-async def list_documents():
+async def list_documents(x_user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """
-    List all ingested documents with metadata.
+    List all ingested documents with metadata, optionally filtered by user.
     
     Returns:
         List of DocumentInfo objects
     """
     try:
         chroma = chroma_client or get_chroma_client()
-        results = chroma.get_all_documents()
+        results = chroma.get_all_documents(user_id=x_user_id)
 
         # Aggregate by doc_id
         doc_map = {}
@@ -362,19 +365,20 @@ async def list_documents():
 
 
 @app.get("/documents/{doc_id}", response_model=DocumentInfo)
-async def get_document(doc_id: str):
+async def get_document(doc_id: str, x_user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """
-    Get metadata for a specific document.
+    Get metadata for a specific document, ensuring user ownership.
     
     Args:
         doc_id: Document ID
+        x_user_id: Optional user identifier
     
     Returns:
         DocumentInfo object
     """
     try:
         chroma = chroma_client or get_chroma_client()
-        results = chroma.get_documents_by_doc_id(doc_id)
+        results = chroma.get_documents_by_doc_id(doc_id, user_id=x_user_id)
 
         if not results["metadatas"]:
             raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
@@ -405,30 +409,31 @@ async def get_document(doc_id: str):
 
 
 @app.delete("/documents/{doc_id}")
-async def delete_document(doc_id: str):
+async def delete_document(doc_id: str, x_user_id: Optional[str] = Header(None, alias="X-User-Id")):
     """
-    Delete a document and all its chunks from the vector database.
+    Delete a document and all its chunks from the vector database, scoped by user.
     
     Args:
         doc_id: Document ID to delete
+        x_user_id: Optional user identifier
     
     Returns:
         JSON with status and count of deleted chunks
     """
     try:
         chroma = chroma_client or get_chroma_client()
-        # Check if document exists first
-        results = chroma.get_documents_by_doc_id(doc_id)
+        # Check if document exists for this user first
+        results = chroma.get_documents_by_doc_id(doc_id, user_id=x_user_id)
 
         if not results["metadatas"]:
             raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
         # Delete the document
-        count = chroma.delete_document(doc_id)
+        count = chroma.delete_document(doc_id, user_id=x_user_id)
         
-        # Invalidate query cache
-        get_cache().clear()
-        logger.info(f"Deleted document {doc_id}, removed {count} chunks, invalidated cache")
+        # Invalidate query cache for this user
+        get_cache().clear(user_id=x_user_id)
+        logger.info(f"Deleted document {doc_id}, removed {count} chunks, invalidated cache (user: {x_user_id})")
         return {
             "status": "success",
             "deleted_chunks": count,
@@ -446,32 +451,41 @@ async def delete_document(doc_id: str):
 @app.get("/ask", response_model=QueryResponse)
 async def ask_query_get(
     query: str = Query(..., description="User question", min_length=1),
-    filter_doc: Optional[str] = Query(None, description="Filter search to specific document")
+    filter_doc: Optional[str] = Query(None, description="Filter search to specific document"),
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id")
 ):
     """
     Query endpoint (GET method).
     """
-    return await _process_query(query, filter_doc=filter_doc)
+    return await _process_query(query, filter_doc=filter_doc, user_id=x_user_id)
 
 
 @app.post("/ask", response_model=QueryResponse)
-async def ask_query_post(request: QueryRequest):
+async def ask_query_post(
+    request: QueryRequest,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id")
+):
     """
     Query endpoint (POST method).
     """
-    return await _process_query(request.query, filter_doc=request.filter_doc)
+    effective_user_id = request.user_id or x_user_id
+    return await _process_query(request.query, filter_doc=request.filter_doc, user_id=effective_user_id)
 
 
-async def _process_query(query: str, filter_doc: Optional[str] = None) -> QueryResponse:
+async def _process_query(
+    query: str,
+    filter_doc: Optional[str] = None,
+    user_id: Optional[str] = None
+) -> QueryResponse:
     """
-    Internal query processing logic.
+    Internal query processing logic with user isolation.
     """
     try:
         chroma = chroma_client or get_chroma_client()
-        # Check if database has any documents
-        if chroma.count() == 0:
+        # Check if database has any documents for this user
+        if chroma.count(user_id=user_id) == 0:
             return QueryResponse(
-                answer="I don't know.",
+                answer="I don't have any documents to answer from. Please upload some documents first.",
                 citations=[],
                 retrieved_chunks=[],
                 tokens=0,
@@ -480,9 +494,9 @@ async def _process_query(query: str, filter_doc: Optional[str] = None) -> QueryR
                 target_doc=filter_doc or ""
             )
 
-        # Process query with document filter
+        # Process query with document filter and tenant isolation
         qs = query_service or get_query_service()
-        result = qs.answer_query(query, k=5, filter_doc=filter_doc)
+        result = qs.answer_query(query, k=5, filter_doc=filter_doc, user_id=user_id)
 
         return QueryResponse(
             answer=result["answer"],
@@ -511,10 +525,10 @@ async def get_cache_stats():
 
 
 @app.get("/graph/data")
-async def get_graph_data():
-    """Build and return Document Knowledge Graph nodes and edges."""
+async def get_graph_data(x_user_id: Optional[str] = Header(None, alias="X-User-Id")):
+    """Build and return Document Knowledge Graph nodes and edges scoped by user."""
     chroma = chroma_client or get_chroma_client()
-    return build_knowledge_graph(chroma)
+    return build_knowledge_graph(chroma, user_id=x_user_id)
 
 
 # Health check endpoint

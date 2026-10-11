@@ -268,7 +268,7 @@ class PDFIngestor:
         finally:
             doc.close()
 
-    def process_pdf(self, pdf_path: str, filename: str) -> Dict:
+    def process_pdf(self, pdf_path: str, filename: str, user_id: Optional[str] = None) -> Dict:
         """
         Complete PDF ingestion pipeline.
 
@@ -281,12 +281,13 @@ class PDFIngestor:
         Args:
             pdf_path: Path to PDF file
             filename: Original filename
+            user_id: Optional owner user ID for multi-tenant isolation
 
         Returns:
             Dict with doc_id, status, chunks, failed_pages
         """
         doc_id = str(uuid.uuid4())
-        logger.info(f"Starting ingestion for {filename} (doc_id: {doc_id})")
+        logger.info(f"Starting ingestion for {filename} (doc_id: {doc_id}, user_id: {user_id})")
 
         # Lazy-initialize chunker on first use
         if self.chunker is None:
@@ -319,14 +320,17 @@ class PDFIngestor:
                 batch_metadatas = []
                 batch_ids = []
                 for _ in batch_chunks:
-                    batch_metadatas.append({
+                    chunk_meta = {
                         "doc_id": doc_id,
                         "source_filename": filename,
                         "page_number": page_num,
                         "chunk_index": chunk_index,
                         "ingested_at": ingested_at,
                         "embedding_model": self.embedder.active_model_name
-                    })
+                    }
+                    if user_id:
+                        chunk_meta["user_id"] = str(user_id)
+                    batch_metadatas.append(chunk_meta)
                     batch_ids.append(f"{doc_id}___{chunk_index}")
                     chunk_index += 1
                 self.chroma_client.add_chunks(

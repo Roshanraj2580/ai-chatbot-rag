@@ -16,6 +16,8 @@ A production-style Retrieval-Augmented Generation (RAG) system that lets you upl
 Most "RAG chatbot" tutorials do naive top-k vector search on a single document and stop there. This project goes further:
 
 - **Sub-5ms Query Acceleration (Upstash Redis)** — Repeated queries bypass the vector database and LLM entirely, cutting response times from **~1,400ms down to <5ms** (a 99.6% speedup). Automatic cache invalidation ensures no stale answers after document uploads or deletions.
+- **Multi-Tenant Document & Session Isolation** — Every uploaded PDF and vector chunk is strictly tagged with the authenticated `user_id`. Vector retrieval, keyword search, knowledge graphs, and document libraries only show the logged-in user's data, preventing cross-tenant leakage.
+- **Tenant-Scoped Caching** — Redis and in-memory cache keys are partitioned by `user_id` (`rag:query:user:<id>:...`), guaranteeing that User A's private document answers are never cached or served to User B.
 - **Document Knowledge Graph (Graph RAG)** — Automatically extracts entities, technical concepts, and cross-document relationships into an interactive node-and-edge network graph (`/graph`), enabling multi-hop relational exploration.
 - **Hybrid Retrieval (Dense + Sparse)** — Semantic vector search (ChromaDB) fused with BM25 keyword search using Reciprocal Rank Fusion (RRF), eliminating pure cosine-similarity false matches.
 - **Full-Stack MLOps Observability** — Built-in telemetry dashboard (`/mlops`) tracking real-time latency percentiles, user feedback loops ($\pm1$), average chunk retrieval counts, token volume, and exact API costs ($ USD).
