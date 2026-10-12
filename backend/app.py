@@ -7,6 +7,8 @@ import tempfile
 from typing import List, Optional
 from datetime import datetime
 from contextlib import asynccontextmanager
+import time
+import urllib.parse
 from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Header, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -29,6 +31,12 @@ from backend.auth import (
     UserLoginRequest,
     TokenResponse,
     UserProfile,
+)
+from backend.chat_history import (
+    init_chat_history_db,
+    save_chat_interaction,
+    fetch_user_chat_history,
+    delete_user_chat_history,
 )
 
 # Load environment variables
@@ -124,6 +132,26 @@ class QueryResponse(BaseModel):
     target_doc: Optional[str] = ""
 
 
+class ChatHistoryItem(BaseModel):
+    """Model for persisted chat conversation turn."""
+    id: int
+    user_query: str
+    bot_answer: str
+    citations: List[dict] = Field(default_factory=list)
+    retrieved_chunks_count: int = 0
+    latency_ms: float = 0.0
+    feedback: int = 0
+    tokens: int = 0
+    cost_usd: float = 0.0
+    target_doc: str = ""
+    timestamp: str = ""
+
+
+class TTSRequest(BaseModel):
+    """Model for text-to-speech request."""
+    text: str = Field(..., min_length=1, max_length=5000)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -188,8 +216,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize Auth database tables
+# Initialize Auth and Chat History database tables
 init_auth_db()
+init_chat_history_db()
 
 
 # ============================================================================
@@ -236,6 +265,41 @@ async def api_login(req: UserLoginRequest):
 async def api_get_me(current_user: UserProfile = Depends(get_current_user)):
     """Get profile of current authenticated user from JWT token."""
     return current_user
+
+
+# ============================================================================
+# Chat History Endpoints (User-Scoped Persistence)
+# ============================================================================
+
+@app.get("/chat/history", response_model=List[ChatHistoryItem])
+async def get_chat_history(
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    current_user: Optional[UserProfile] = Depends(get_current_user_optional)
+):
+    """
+    Retrieve persistent chat history strictly filtered for the authenticated user.
+    """
+    effective_user_id = str(current_user.id) if current_user else x_user_id
+    if not effective_user_id:
+        return []
+    uid = int(effective_user_id) if effective_user_id.isdigit() else 0
+    return fetch_user_chat_history(uid)
+
+
+@app.delete("/chat/history")
+async def clear_chat_history(
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    current_user: Optional[UserProfile] = Depends(get_current_user_optional)
+):
+    """
+    Clear persistent chat history strictly for the authenticated user.
+    """
+    effective_user_id = str(current_user.id) if current_user else x_user_id
+    if effective_user_id:
+        uid = int(effective_user_id) if effective_user_id.isdigit() else 0
+        delete_user_chat_history(uid)
+    return {"status": "success", "message": "Chat history cleared"}
+
 
 
 @app.get("/")
@@ -552,7 +616,8 @@ async def ask_query_get(
     Query endpoint (GET method).
     """
     effective_user_id = str(current_user.id) if current_user else x_user_id
-    return await _process_query(query, filter_doc=filter_doc, user_id=effective_user_id)
+    username = current_user.username if current_user else "user"
+    return await _process_query(query, filter_doc=filter_doc, user_id=effective_user_id, username=username)
 
 
 @app.post("/ask", response_model=QueryResponse)
@@ -565,23 +630,42 @@ async def ask_query_post(
     Query endpoint (POST method).
     """
     effective_user_id = str(current_user.id) if current_user else (request.user_id or x_user_id)
-    return await _process_query(request.query, filter_doc=request.filter_doc, user_id=effective_user_id)
+    username = current_user.username if current_user else "user"
+    return await _process_query(request.query, filter_doc=request.filter_doc, user_id=effective_user_id, username=username)
 
 
 async def _process_query(
     query: str,
     filter_doc: Optional[str] = None,
-    user_id: Optional[str] = None
+    user_id: Optional[str] = None,
+    username: str = "user"
 ) -> QueryResponse:
     """
-    Internal query processing logic with user isolation.
+    Internal query processing logic with user isolation and persistent history logging.
     """
+    start_time = time.time()
     try:
         chroma = chroma_client or get_chroma_client()
         # Check if database has any documents for this user
         if chroma.count(user_id=user_id) == 0:
+            ans = "I don't have any documents to answer from. Please upload some documents first."
+            latency = (time.time() - start_time) * 1000
+            if user_id:
+                uid = int(user_id) if user_id.isdigit() else 0
+                save_chat_interaction(
+                    user_id=uid,
+                    username=username,
+                    query=query,
+                    answer=ans,
+                    citations=[],
+                    chunks_count=0,
+                    latency_ms=latency,
+                    tokens=0,
+                    cost_usd=0.0,
+                    target_doc=filter_doc or ""
+                )
             return QueryResponse(
-                answer="I don't have any documents to answer from. Please upload some documents first.",
+                answer=ans,
                 citations=[],
                 retrieved_chunks=[],
                 tokens=0,
@@ -593,6 +677,22 @@ async def _process_query(
         # Process query with document filter and tenant isolation
         qs = query_service or get_query_service()
         result = qs.answer_query(query, k=5, filter_doc=filter_doc, user_id=user_id)
+        latency = (time.time() - start_time) * 1000
+
+        if user_id:
+            uid = int(user_id) if user_id.isdigit() else 0
+            save_chat_interaction(
+                user_id=uid,
+                username=username,
+                query=query,
+                answer=result["answer"],
+                citations=result.get("citations", []),
+                chunks_count=len(result.get("retrieved_chunks", [])),
+                latency_ms=latency,
+                tokens=result.get("tokens", 0),
+                cost_usd=result.get("cost_usd", 0.0),
+                target_doc=result.get("target_doc", "")
+            )
 
         return QueryResponse(
             answer=result["answer"],
@@ -653,44 +753,46 @@ def cleanup_temp_file(path: str) -> None:
 @app.post("/voice/conversation")
 async def voice_conversation(
     file: UploadFile = File(...),
-    background_tasks: BackgroundTasks = BackgroundTasks()
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    current_user: Optional[UserProfile] = Depends(get_current_user_optional)
 ):
     """
     Real-time voice conversation: user speaks → RAG query → LLM responds with voice.
     
     This endpoint processes one turn of conversation:
     1. Transcribe user's speech from audio
-    2. Query the RAG system with transcribed text
+    2. Query the RAG system with transcribed text (tenant isolated)
     3. Generate voice response from LLM answer
-    
-    Args:
-        file: Audio file with user's speech (WAV format recommended)
-    
-    Returns:
-        Audio file (MP3) with LLM's spoken response
-        Headers include:
-        - X-User-Text: Transcribed user speech
-        - X-LLM-Text: LLM's text response
+    4. Save conversation turn into user's chat history
     """
+    effective_user_id = str(current_user.id) if current_user else x_user_id
+    username = current_user.username if current_user else "user"
+    captured_user_text = ""
+    captured_answer = ""
+    captured_result = {}
+
     try:
         # Read audio content
         audio_content = await file.read()
-
-        logger.info(f"Received voice conversation request, audio size: {len(audio_content)} bytes")
+        logger.info(f"Received voice conversation request, audio size: {len(audio_content)} bytes (user: {effective_user_id})")
 
         # Get real-time conversation handler
         conversation = get_realtime_conversation()
 
         # Define RAG callback
         async def rag_callback(user_text: str) -> str:
-            """Query RAG system with user's question."""
+            nonlocal captured_user_text, captured_answer, captured_result
+            captured_user_text = user_text
             chroma = chroma_client or get_chroma_client()
-            if chroma.count() == 0:
-                return "I don't have any documents to answer from. Please upload some documents first."
+            if chroma.count(user_id=effective_user_id) == 0:
+                captured_answer = "I don't have any documents to answer from. Please upload some documents first."
+                return captured_answer
 
             qs = query_service or get_query_service()
-            result = qs.answer_query(user_text, k=5)
-            return result["answer"]
+            captured_result = qs.answer_query(user_text, k=5, user_id=effective_user_id)
+            captured_answer = captured_result.get("answer", "")
+            return captured_answer
 
         # Process conversation turn
         response_audio_bytes = await conversation.process_conversation_turn(
@@ -702,6 +804,20 @@ async def voice_conversation(
             raise HTTPException(
                 status_code=400,
                 detail="Could not process voice conversation. Please speak clearly and try again."
+            )
+
+        # Save to user's persistent chat history
+        if captured_user_text and captured_answer and effective_user_id:
+            uid = int(effective_user_id) if effective_user_id.isdigit() else 0
+            save_chat_interaction(
+                user_id=uid,
+                username=username,
+                query=captured_user_text,
+                answer=captured_answer,
+                citations=captured_result.get("citations", []),
+                chunks_count=len(captured_result.get("retrieved_chunks", [])),
+                tokens=captured_result.get("tokens", 0),
+                cost_usd=captured_result.get("cost_usd", 0.0)
             )
 
         # Create temporary file for response
@@ -716,10 +832,12 @@ async def voice_conversation(
             tmp_path,
             media_type="audio/mpeg",
             filename="response.mp3",
-            background=background_tasks,  # Ensures cleanup runs after response
+            background=background_tasks,
             headers={
                 "X-Conversation-Turn": "complete",
-                "Access-Control-Expose-Headers": "X-Conversation-Turn"
+                "X-User-Text": urllib.parse.quote(captured_user_text or ""),
+                "X-LLM-Text": urllib.parse.quote(captured_answer or ""),
+                "Access-Control-Expose-Headers": "X-Conversation-Turn, X-User-Text, X-LLM-Text"
             }
         )
 
@@ -731,6 +849,41 @@ async def voice_conversation(
             status_code=500,
             detail=f"Voice conversation failed: {str(e)}"
         )
+
+
+@app.post("/voice/tts")
+async def text_to_speech(
+    req: TTSRequest,
+    background_tasks: BackgroundTasks = BackgroundTasks()
+):
+    """
+    Generate speech audio (MP3) from text for voice-over read aloud.
+    """
+    try:
+        conversation = get_realtime_conversation()
+        audio_bytes = await conversation.synthesize_stream(req.text[:2000])
+        if not audio_bytes:
+            raise HTTPException(status_code=500, detail="Text-to-speech synthesis failed")
+
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp3', mode='wb', dir=TEMP_UPLOAD_DIR) as tmp_file:
+            tmp_file.write(audio_bytes)
+            tmp_path = tmp_file.name
+
+        background_tasks.add_task(cleanup_temp_file, tmp_path)
+
+        return FileResponse(
+            tmp_path,
+            media_type="audio/mpeg",
+            filename="speech.mp3",
+            background=background_tasks,
+            headers={"Access-Control-Expose-Headers": "Content-Disposition"}
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"TTS synthesis failed: {e}")
+        raise HTTPException(status_code=500, detail=f"TTS synthesis failed: {str(e)}")
+
 
 
 if __name__ == "__main__":
