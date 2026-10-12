@@ -17,8 +17,8 @@ JWT_SECRET_KEY = os.getenv("JWT_SECRET_KEY", "rag-jwt-super-secret-key-2026-prod
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRATION_HOURS = int(os.getenv("JWT_EXPIRATION_HOURS", "24"))
 
-# Database path (same SQLite database)
-DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "ui_flask", "rag_app.db")
+# Database path (SQLite application database)
+DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "rag_app.db")
 
 security = HTTPBearer(auto_error=False)
 

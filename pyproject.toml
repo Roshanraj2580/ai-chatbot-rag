@@ -36,4 +36,4 @@ select = ["E", "F", "W", "I"]
 ignore = ["E501"]  # Line too long (handled by formatter)
 
 [tool.ruff.isort]
-known-first-party = ["backend", "ui_flask"]
+known-first-party = ["backend"]

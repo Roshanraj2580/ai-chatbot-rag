@@ -1,13 +1,13 @@
 # AI RAG Chatbot: Enterprise Hybrid RAG Platform
 
-A production-style Retrieval-Augmented Generation (RAG) system that lets you upload PDFs and ask questions about them in natural language — with text **and** voice. Features **sub-5ms Redis query caching**, an interactive **Document Knowledge Graph (Graph RAG)**, full **user authentication**, and an **MLOps observability dashboard** tracking latency, user feedback, and real-time financial API costs.
+A production-grade Retrieval-Augmented Generation (RAG) single-page application that lets you upload PDFs and ask questions about them in natural language — with text **and** voice. Features a **React 19 + Vite SPA**, **sub-5ms Redis query caching**, interactive **Citation Inspector**, full **JWT Bearer authentication**, persistent conversation threads in **SQLite (`data/rag_app.db`)**, and an **MLOps observability dashboard** tracking latency, tokens, and real-time financial API costs.
 
 [![CI/CD Pipeline](https://github.com/Roshanraj2580/ai-chatbot-rag/actions/workflows/ci.yml/badge.svg)](https://github.com/Roshanraj2580/ai-chatbot-rag/actions/workflows/ci.yml)
 [![Python 3.11](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/downloads/release/python-3110/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.121.3-009688.svg)](https://fastapi.tiangolo.com)
-[![Flask](https://img.shields.io/badge/Flask-3.1.2-black.svg)](https://flask.palletsprojects.com/)
+[![React 19](https://img.shields.io/badge/React-19.3.0-61DAFB.svg)](https://react.dev/)
+[![Vite](https://img.shields.io/badge/Vite-8.3.4-646CFF.svg)](https://vitejs.dev/)
 [![Redis](https://img.shields.io/badge/Redis-Upstash%20Cloud-red.svg)](https://upstash.com/)
-[![Tests](https://img.shields.io/badge/Tests-43%20Passed-success.svg)](https://github.com/Roshanraj2580/ai-chatbot-rag)
 
 ---
 
@@ -15,19 +15,15 @@ A production-style Retrieval-Augmented Generation (RAG) system that lets you upl
 
 Most "RAG chatbot" tutorials do naive top-k vector search on a single document and stop there. This project goes further:
 
+- **React 19 + Vite Modern SPA** — High-performance frontend with instant HMR, modern glassmorphism styling, multi-session sidebar, and interactive citation inspector.
 - **Sub-5ms Query Acceleration (Upstash Redis)** — Repeated queries bypass the vector database and LLM entirely, cutting response times from **~1,400ms down to <5ms** (a 99.6% speedup). Automatic cache invalidation ensures no stale answers after document uploads or deletions.
-- **Multi-Tenant Document & Session Isolation** — Every uploaded PDF and vector chunk is strictly tagged with the authenticated `user_id`. Vector retrieval, keyword search, knowledge graphs, and document libraries only show the logged-in user's data, preventing cross-tenant leakage.
+- **Multi-Tenant Document & Session Isolation** — Every uploaded PDF and vector chunk is strictly tagged with the authenticated `user_id`. Vector retrieval, keyword search, and document libraries only show the logged-in user's data, preventing cross-tenant leakage.
 - **Tenant-Scoped Caching** — Redis and in-memory cache keys are partitioned by `user_id` (`rag:query:user:<id>:...`), guaranteeing that User A's private document answers are never cached or served to User B.
-- **Document Knowledge Graph (Graph RAG)** — Automatically extracts entities, technical concepts, and cross-document relationships into an interactive node-and-edge network graph (`/graph`), enabling multi-hop relational exploration.
+- **Interactive Citation Inspector Drawer** — Clicking any source citation opens a slide-over verification drawer displaying the exact verbatim chunk excerpt, page number, and grounded relevance match score.
 - **Hybrid Retrieval (Dense + Sparse)** — Semantic vector search (ChromaDB) fused with BM25 keyword search using Reciprocal Rank Fusion (RRF), eliminating pure cosine-similarity false matches.
-- **Full-Stack MLOps Observability** — Built-in telemetry dashboard (`/mlops`) tracking real-time latency percentiles, user feedback loops ($\pm1$), average chunk retrieval counts, token volume, and exact API costs ($ USD).
-- **Document-Scoped Query Filtering** — Header dropdown allows users to query across all documents or scope their question to a single specific PDF.
-- **Token & Financial Cost Accounting** — Real-time token estimation and exact cost accounting using official Gemini 3.8 Flash pricing ($0.075 / 1M prompt, $0.30 / 1M completion).
-- **One-Click Clipboard Copy** — Fast copy button on every assistant bubble with animated visual confirmation.
-- **Memory-Safe PDF Streaming** — Extracts and embeds page-by-page using generators and micro-batches with explicit garbage collection, avoiding memory spikes on large PDFs.
-- **Voice Conversation Loop** — Full Speech-to-Text (STT) → RAG → Text-to-Speech (TTS) pipeline for hands-free conversational turns.
-- **User Authentication & Persistent History** — Secure cryptographic password hashing, user session management, and per-user conversation logging in SQLite.
-- **Automated CI/CD Pipeline** — GitHub Actions workflow executing strict Flake8 linting, Pytest test suites (**43 passing tests**), and Docker build validation on every push.
+- **Full-Stack MLOps Observability** — Built-in telemetry dashboard tracking real-time latency, cache hit rates, average chunk retrieval counts, token volume, and exact API costs ($ USD).
+- **Voice Over & Speech Loop** — Dual Voice Over playback via server-side gTTS MP3 stream and browser Web Speech Synthesis, plus real-time microphone speech recognition.
+- **JWT Authentication & Persistent History** — Secure cryptographic password hashing, JWT Bearer tokens, and per-user conversation logging in SQLite (`data/rag_app.db`).
 
 ---
 
@@ -39,16 +35,16 @@ Two decoupled services talk over HTTP, separating presentation from the core RAG
 
 ```
 ┌──────────────────────────────────────┐          HTTP / REST          ┌──────────────────────────────────────┐
-│           Flask Web UI               │ ────────────────────────────▶ │           FastAPI Backend            │
-│            (Port 5000)               │ ◀──────────────────────────── │             (Port 8000)              │
-│                                      │                               │                                      │
-│  • Chat & Document Filter            │                               │  • /ask (RAG Query Engine)           │
-│  • Interactive Knowledge Graph       │                               │  • /documents (Batch Ingestion)      │
-│  • MLOps Observability Dashboard     │                               │  • /graph/data (Entity Extraction)   │
-│  • Voice Audio Recorder & Player     │                               │  • /cache/stats (Redis Telemetry)    │
-│  • User Auth (SQLite Database)       │                               │  • /voice/conversation (STT/TTS)     │
+│        React 19 + Vite SPA           │ ────────────────────────────▶ │           FastAPI Backend            │
+│            (Port 5173)               │ ◀──────────────────────────── │             (Port 8000)              │
+│                                      │   (JWT Bearer Authorization)  │                                      │
+│  • Multi-Thread Session Sidebar      │                               │  • /ask (RAG Query Engine)           │
+│  • Interactive Citation Drawer       │                               │  • /documents (Batch Ingestion)      │
+│  • MLOps Observability Dashboard     │                               │  • /auth (JWT Register & Login)      │
+│  • Voice Over & Speech-to-Text       │                               │  • /chat/history (User Persistence)  │
+│  • Document Scope Filtering          │                               │  • /voice/tts & /voice/conversation  │
 └──────────────────────────────────────┘                               └──────────────────┬───────────────────┘
-                                                                                          │
+```                                                                                          │
                                              ┌────────────────────────────────────────────┼────────────────────────────────────────────┐
                                              ▼                                            ▼                                            ▼
                               ┌─────────────────────────────┐              ┌─────────────────────────────┐              ┌─────────────────────────────┐
@@ -253,15 +249,17 @@ uvicorn backend.app:app --host 127.0.0.1 --port 8000 --reload
 # → Swagger API Docs: http://127.0.0.1:8000/docs
 ```
 
-**Terminal 2 — Flask Web Interface:**
+**Terminal 2 — React 19 + Vite Frontend SPA:**
 ```bash
-python ui_flask/app.py
-# → Web Application: http://127.0.0.1:5000
+cd frontend
+npm install
+npm run dev
+# → Web Application: http://localhost:5173
 ```
 
 **Default Demo Credentials:**
 - Username: `admin` | Password: `admin123`
-- Or register any new account on the `/login` page.
+- Or register any new account on the Auth modal.
 
 ---
 
