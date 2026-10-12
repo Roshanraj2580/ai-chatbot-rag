@@ -7,7 +7,7 @@ import tempfile
 from typing import List, Optional
 from datetime import datetime
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Header, BackgroundTasks
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query, Header, Depends, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
@@ -18,7 +18,18 @@ from backend.query import get_query_service
 from backend.chroma_client import get_chroma_client
 from backend.voice_realtime import get_realtime_conversation
 from backend.cache import get_cache
-from backend.graph import build_knowledge_graph
+from backend.auth import (
+    init_auth_db,
+    register_user,
+    authenticate_user,
+    create_access_token,
+    get_current_user,
+    get_current_user_optional,
+    UserRegisterRequest,
+    UserLoginRequest,
+    TokenResponse,
+    UserProfile,
+)
 
 # Load environment variables
 load_dotenv()
@@ -155,11 +166,76 @@ async def lifespan(app: FastAPI):
 
 # Initialize FastAPI app
 app = FastAPI(
-    title=" AI RAG Chatbot API",
+    title="AI RAG Chatbot API",
     description="PDF ingestion and query API with local embeddings and Gemini LLM",
     version="1.0.0",
     lifespan=lifespan
 )
+
+# Enable CORS for React frontend (Vite port 5173 / localhost)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:5000",
+        "http://127.0.0.1:5000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Initialize Auth database tables
+init_auth_db()
+
+
+# ============================================================================
+# Authentication Endpoints (JWT)
+# ============================================================================
+
+@app.post("/auth/register", response_model=TokenResponse, status_code=201)
+async def api_register(req: UserRegisterRequest):
+    """Register a new user and return a JWT access token."""
+    try:
+        user = register_user(req.username, req.password)
+        token = create_access_token(user["id"], user["username"], user["role"])
+        return TokenResponse(
+            access_token=token,
+            token_type="bearer",
+            user_id=user["id"],
+            username=user["username"],
+            role=user["role"]
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Registration failed: {e}")
+        raise HTTPException(status_code=500, detail="Registration failed")
+
+
+@app.post("/auth/login", response_model=TokenResponse)
+async def api_login(req: UserLoginRequest):
+    """Authenticate credentials and return a signed JWT token."""
+    user = authenticate_user(req.username, req.password)
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    token = create_access_token(user["id"], user["username"], user["role"])
+    return TokenResponse(
+        access_token=token,
+        token_type="bearer",
+        user_id=user["id"],
+        username=user["username"],
+        role=user["role"]
+    )
+
+
+@app.get("/auth/me", response_model=UserProfile)
+async def api_get_me(current_user: UserProfile = Depends(get_current_user)):
+    """Get profile of current authenticated user from JWT token."""
+    return current_user
 
 
 @app.get("/")
@@ -198,18 +274,21 @@ async def get_config():
 @app.post("/documents", response_model=IngestResponse, status_code=201)
 async def upload_document(
     file: UploadFile = File(...),
-    x_user_id: Optional[str] = Header(None, alias="X-User-Id")
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    current_user: Optional[UserProfile] = Depends(get_current_user_optional)
 ):
     """
-    Upload and ingest a PDF document with tenant isolation.
+    Upload and ingest a PDF document with tenant isolation (JWT or header).
     
     Args:
         file: PDF file (multipart/form-data)
         x_user_id: Optional user identifier from request header
+        current_user: Optional user from JWT Bearer token
     
     Returns:
         IngestResponse with doc_id, status, chunks, and failed_pages
     """
+    effective_user_id = str(current_user.id) if current_user else x_user_id
     global ingestor
 
     # Validate file type
@@ -230,15 +309,15 @@ async def upload_document(
             ingestor = get_ingestor()
 
         logger.info("Calling process_pdf...")
-        result = ingestor.process_pdf(tmp_path, file.filename, user_id=x_user_id)
+        result = ingestor.process_pdf(tmp_path, file.filename, user_id=effective_user_id)
         logger.info("process_pdf finished")
 
         # Clean up temp file
         os.unlink(tmp_path)
 
         # Invalidate query cache for fresh document retrieval (scoped to user)
-        get_cache().clear(user_id=x_user_id)
-        logger.info(f"Invalidated query cache after document upload (user: {x_user_id})")
+        get_cache().clear(user_id=effective_user_id)
+        logger.info(f"Invalidated query cache after document upload (user: {effective_user_id})")
 
         return IngestResponse(**result)
 
@@ -316,16 +395,20 @@ async def upload_documents_batch(files: List[UploadFile] = File(...)):
 
 
 @app.get("/documents", response_model=List[DocumentInfo])
-async def list_documents(x_user_id: Optional[str] = Header(None, alias="X-User-Id")):
+async def list_documents(
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    current_user: Optional[UserProfile] = Depends(get_current_user_optional)
+):
     """
     List all ingested documents with metadata, optionally filtered by user.
     
     Returns:
         List of DocumentInfo objects
     """
+    effective_user_id = str(current_user.id) if current_user else x_user_id
     try:
         chroma = chroma_client or get_chroma_client()
-        results = chroma.get_all_documents(user_id=x_user_id)
+        results = chroma.get_all_documents(user_id=effective_user_id)
 
         # Aggregate by doc_id
         doc_map = {}
@@ -365,7 +448,11 @@ async def list_documents(x_user_id: Optional[str] = Header(None, alias="X-User-I
 
 
 @app.get("/documents/{doc_id}", response_model=DocumentInfo)
-async def get_document(doc_id: str, x_user_id: Optional[str] = Header(None, alias="X-User-Id")):
+async def get_document(
+    doc_id: str,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    current_user: Optional[UserProfile] = Depends(get_current_user_optional)
+):
     """
     Get metadata for a specific document, ensuring user ownership.
     
@@ -376,9 +463,10 @@ async def get_document(doc_id: str, x_user_id: Optional[str] = Header(None, alia
     Returns:
         DocumentInfo object
     """
+    effective_user_id = str(current_user.id) if current_user else x_user_id
     try:
         chroma = chroma_client or get_chroma_client()
-        results = chroma.get_documents_by_doc_id(doc_id, user_id=x_user_id)
+        results = chroma.get_documents_by_doc_id(doc_id, user_id=effective_user_id)
 
         if not results["metadatas"]:
             raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
@@ -409,7 +497,11 @@ async def get_document(doc_id: str, x_user_id: Optional[str] = Header(None, alia
 
 
 @app.delete("/documents/{doc_id}")
-async def delete_document(doc_id: str, x_user_id: Optional[str] = Header(None, alias="X-User-Id")):
+async def delete_document(
+    doc_id: str,
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    current_user: Optional[UserProfile] = Depends(get_current_user_optional)
+):
     """
     Delete a document and all its chunks from the vector database, scoped by user.
     
@@ -420,20 +512,21 @@ async def delete_document(doc_id: str, x_user_id: Optional[str] = Header(None, a
     Returns:
         JSON with status and count of deleted chunks
     """
+    effective_user_id = str(current_user.id) if current_user else x_user_id
     try:
         chroma = chroma_client or get_chroma_client()
         # Check if document exists for this user first
-        results = chroma.get_documents_by_doc_id(doc_id, user_id=x_user_id)
+        results = chroma.get_documents_by_doc_id(doc_id, user_id=effective_user_id)
 
         if not results["metadatas"]:
             raise HTTPException(status_code=404, detail=f"Document {doc_id} not found")
 
         # Delete the document
-        count = chroma.delete_document(doc_id, user_id=x_user_id)
+        count = chroma.delete_document(doc_id, user_id=effective_user_id)
         
         # Invalidate query cache for this user
-        get_cache().clear(user_id=x_user_id)
-        logger.info(f"Deleted document {doc_id}, removed {count} chunks, invalidated cache (user: {x_user_id})")
+        get_cache().clear(user_id=effective_user_id)
+        logger.info(f"Deleted document {doc_id}, removed {count} chunks, invalidated cache (user: {effective_user_id})")
         return {
             "status": "success",
             "deleted_chunks": count,
@@ -452,23 +545,26 @@ async def delete_document(doc_id: str, x_user_id: Optional[str] = Header(None, a
 async def ask_query_get(
     query: str = Query(..., description="User question", min_length=1),
     filter_doc: Optional[str] = Query(None, description="Filter search to specific document"),
-    x_user_id: Optional[str] = Header(None, alias="X-User-Id")
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    current_user: Optional[UserProfile] = Depends(get_current_user_optional)
 ):
     """
     Query endpoint (GET method).
     """
-    return await _process_query(query, filter_doc=filter_doc, user_id=x_user_id)
+    effective_user_id = str(current_user.id) if current_user else x_user_id
+    return await _process_query(query, filter_doc=filter_doc, user_id=effective_user_id)
 
 
 @app.post("/ask", response_model=QueryResponse)
 async def ask_query_post(
     request: QueryRequest,
-    x_user_id: Optional[str] = Header(None, alias="X-User-Id")
+    x_user_id: Optional[str] = Header(None, alias="X-User-Id"),
+    current_user: Optional[UserProfile] = Depends(get_current_user_optional)
 ):
     """
     Query endpoint (POST method).
     """
-    effective_user_id = request.user_id or x_user_id
+    effective_user_id = str(current_user.id) if current_user else (request.user_id or x_user_id)
     return await _process_query(request.query, filter_doc=request.filter_doc, user_id=effective_user_id)
 
 
@@ -522,13 +618,6 @@ async def _process_query(
 async def get_cache_stats():
     """Get query cache statistics."""
     return get_cache().get_stats()
-
-
-@app.get("/graph/data")
-async def get_graph_data(x_user_id: Optional[str] = Header(None, alias="X-User-Id")):
-    """Build and return Document Knowledge Graph nodes and edges scoped by user."""
-    chroma = chroma_client or get_chroma_client()
-    return build_knowledge_graph(chroma, user_id=x_user_id)
 
 
 # Health check endpoint

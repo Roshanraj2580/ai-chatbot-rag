@@ -219,20 +219,6 @@ def mlops():
     return render_template("mlops.html", metrics=metrics)
 
 
-@app.route("/graph")
-@login_required
-def knowledge_graph():
-    """Interactive Knowledge Graph for Graph RAG visualization."""
-    return render_template("graph.html")
-
-
-@app.route("/api/graph", methods=["GET"])
-@login_required
-def api_graph():
-    """Proxy to fetch knowledge graph data."""
-    data = call_backend("/graph/data")
-    return jsonify(data)
-
 
 # ============================================================================
 # API Routes (Proxy to FastAPI Backend & MLOps Tracking)
