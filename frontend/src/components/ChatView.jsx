@@ -1,18 +1,24 @@
 import React, { useState, useEffect, useRef } from "react";
 import api from "../api/client";
+import CitationInspector from "./CitationInspector";
 import { 
   Send, Bot, User, FileText, Copy, Check, Sparkles, Zap, 
-  Mic, MicOff, Volume2, VolumeX, Trash2, RotateCcw, AlertCircle
+  Mic, MicOff, Volume2, VolumeX, Trash2, RotateCcw, 
+  Plus, MessageSquare, Download, ChevronRight, PanelLeftClose, PanelLeft,
+  Search, ShieldCheck
 } from "lucide-react";
 
 export default function ChatView() {
   const [messages, setMessages] = useState([]);
+  const [rawHistory, setRawHistory] = useState([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(true);
   const [documents, setDocuments] = useState([]);
   const [filterDoc, setFilterDoc] = useState("");
   const [copiedId, setCopiedId] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [activeCitation, setActiveCitation] = useState(null);
 
   // Voice States
   const [isRecording, setIsRecording] = useState(false);
@@ -26,15 +32,13 @@ export default function ChatView() {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
 
-  // 1. Load documents and persistent chat history on mount
+  // Load documents and chat history
   useEffect(() => {
-    // Load documents
     api
       .get("/documents")
       .then((res) => setDocuments(res.data || []))
       .catch((err) => console.error("Failed to load documents", err));
 
-    // Load user's saved chat history
     loadHistory();
 
     return () => {
@@ -48,19 +52,10 @@ export default function ChatView() {
       setHistoryLoading(true);
       const res = await api.get("/chat/history");
       const historyItems = res.data || [];
+      setRawHistory(historyItems);
 
       if (historyItems.length === 0) {
-        setMessages([
-          {
-            id: "intro",
-            role: "assistant",
-            text: "Hello! I am your enterprise RAG assistant. Ask me questions about your uploaded documents, or select a specific document to filter by.",
-            citations: [],
-            tokens: 0,
-            cost_usd: 0,
-            from_cache: false,
-          },
-        ]);
+        setMessages([]);
       } else {
         const parsed = [];
         historyItems.forEach((h) => {
@@ -87,42 +82,66 @@ export default function ChatView() {
       }
     } catch (err) {
       console.error("Failed to load chat history", err);
-      setMessages([
-        {
-          id: "intro",
-          role: "assistant",
-          text: "Welcome! Ask me any question about your documents.",
-          citations: [],
-        },
-      ]);
     } finally {
       setHistoryLoading(false);
     }
   };
 
+  const startNewChat = () => {
+    setMessages([]);
+    stopVoicePlayback();
+  };
+
   const handleClearHistory = async () => {
-    if (!window.confirm("Are you sure you want to clear your entire chat history?")) return;
+    if (!window.confirm("Are you sure you want to permanently clear your chat history?")) return;
     try {
       await api.delete("/chat/history");
-      setMessages([
-        {
-          id: "intro",
-          role: "assistant",
-          text: "Chat history cleared. You can start a fresh conversation!",
-          citations: [],
-        },
-      ]);
+      setRawHistory([]);
+      setMessages([]);
       stopVoicePlayback();
     } catch (err) {
       alert("Failed to clear chat history: " + (err.response?.data?.detail || err.message));
     }
   };
 
+  const handleExportBrief = () => {
+    if (messages.length === 0) {
+      alert("No messages to export yet.");
+      return;
+    }
+
+    let brief = `# Enterprise AI RAG Intelligence Brief\nGenerated: ${new Date().toLocaleString()}\nDocument Filter: ${filterDoc || "All Tenant Documents"}\n\n---\n\n`;
+    
+    messages.forEach((m) => {
+      if (m.role === "user") {
+        brief += `### 👤 Question:\n${m.text}\n\n`;
+      } else {
+        brief += `### 🤖 Grounded Answer:\n${m.text}\n\n`;
+        if (m.citations && m.citations.length > 0) {
+          brief += `**Sources:**\n`;
+          m.citations.forEach((c) => {
+            brief += `- ${c.source_filename} (Page ${c.page_number})\n`;
+          });
+          brief += `\n`;
+        }
+        brief += `---\n\n`;
+      }
+    });
+
+    const blob = new Blob([brief], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `rag_brief_${Date.now()}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
-  // 2. Text Query Handler
+  // Submit Text Query
   const handleSend = async (e) => {
     if (e) e.preventDefault();
     if (!input.trim() || loading) return;
@@ -158,7 +177,12 @@ export default function ChatView() {
       };
       setMessages((prev) => [...prev, botMsg]);
 
-      // If Auto Voice Over is enabled, automatically speak answer
+      // Update history sidebar
+      setRawHistory((prev) => [
+        { id: Date.now(), user_query: queryText, timestamp: new Date().toLocaleTimeString() },
+        ...prev,
+      ]);
+
       if (autoVoiceOver && data.answer) {
         playVoiceOver(botMsg.id, data.answer);
       }
@@ -178,7 +202,7 @@ export default function ChatView() {
     }
   };
 
-  // 3. Voice Over / TTS Playback
+  // Voice Playback (TTS)
   const stopVoicePlayback = () => {
     if (currentAudioRef.current) {
       currentAudioRef.current.pause();
@@ -195,12 +219,10 @@ export default function ChatView() {
       stopVoicePlayback();
       return;
     }
-
     stopVoicePlayback();
     setPlayingMessageId(msgId);
 
     try {
-      // First try backend TTS endpoint (/voice/tts)
       const res = await api.post(
         "/voice/tts",
         { text: text.slice(0, 1500) },
@@ -214,12 +236,9 @@ export default function ChatView() {
         setPlayingMessageId(null);
         currentAudioRef.current = null;
       };
-      audio.onerror = () => {
-        fallbackBrowserTTS(msgId, text);
-      };
+      audio.onerror = () => fallbackBrowserTTS(msgId, text);
       await audio.play();
     } catch (err) {
-      // Fallback to browser Web Speech Synthesis if backend TTS fails
       fallbackBrowserTTS(msgId, text);
     }
   };
@@ -232,13 +251,12 @@ export default function ChatView() {
     const cleanText = text.replace(/[*_#`[\]()]/g, "");
     const utterance = new SpeechSynthesisUtterance(cleanText);
     utterance.rate = 1.0;
-    utterance.pitch = 1.0;
     utterance.onend = () => setPlayingMessageId(null);
     utterance.onerror = () => setPlayingMessageId(null);
     window.speechSynthesis.speak(utterance);
   };
 
-  // 4. Voice Input (Speech-to-Text Recording)
+  // Voice Input (Speech-to-Text)
   const toggleRecording = () => {
     if (isRecording) {
       stopRecording();
@@ -259,7 +277,7 @@ export default function ChatView() {
 
         recognition.onstart = () => {
           setIsRecording(true);
-          setRecordingStatus("Listening... speak your question");
+          setRecordingStatus("Listening... speak your question now");
         };
 
         recognition.onresult = (event) => {
@@ -269,9 +287,8 @@ export default function ChatView() {
           setInput(transcript);
         };
 
-        recognition.onerror = (event) => {
-          console.warn("Speech recognition error:", event.error);
-          setRecordingStatus("Error listening. Try again.");
+        recognition.onerror = () => {
+          setRecordingStatus("Speech error, click mic to retry.");
           stopRecording();
         };
 
@@ -284,47 +301,41 @@ export default function ChatView() {
         recognition.start();
         return;
       } catch (e) {
-        console.warn("Native speech recognition failed, falling back to audio recording", e);
+        console.warn("Native recognition fallback", e);
       }
     }
 
-    // Fallback: Audio recording via MediaRecorder sending to backend /voice/conversation
+    // MediaRecorder fallback
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaRecorderRef.current = new MediaRecorder(stream);
       audioChunksRef.current = [];
 
-      mediaRecorderRef.current.ondataavailable = (event) => {
-        if (event.data.size > 0) audioChunksRef.current.push(event.data);
+      mediaRecorderRef.current.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
       };
 
       mediaRecorderRef.current.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: "audio/wav" });
         stream.getTracks().forEach((track) => track.stop());
 
-        // Send to backend /voice/conversation
         setLoading(true);
-        setRecordingStatus("Transcribing & analyzing with AI...");
+        setRecordingStatus("Synthesizing audio & querying RAG...");
 
         try {
           const formData = new FormData();
-          formData.append("file", audioBlob, "voice_input.wav");
+          formData.append("file", audioBlob, "voice.wav");
 
-          const res = await api.post("/voice/conversation", formData, {
-            responseType: "blob",
-          });
-
-          // Extract headers
+          const res = await api.post("/voice/conversation", formData, { responseType: "blob" });
           const rawUserText = res.headers["x-user-text"];
           const rawLlmText = res.headers["x-llm-text"];
           const userText = rawUserText ? decodeURIComponent(rawUserText) : "Spoken question";
-          const llmText = rawLlmText ? decodeURIComponent(rawLlmText) : "Voice response generated";
+          const llmText = rawLlmText ? decodeURIComponent(rawLlmText) : "Audio response synthesized";
 
           const userMsg = { id: "u_" + Date.now(), role: "user", text: userText };
           const botMsg = { id: "b_" + Date.now(), role: "assistant", text: llmText };
           setMessages((prev) => [...prev, userMsg, botMsg]);
 
-          // Play returned audio response
           const audioUrl = URL.createObjectURL(res.data);
           const audio = new Audio(audioUrl);
           currentAudioRef.current = audio;
@@ -332,7 +343,7 @@ export default function ChatView() {
           audio.onended = () => setPlayingMessageId(null);
           await audio.play();
         } catch (err) {
-          alert("Voice processing error: " + (err.response?.data?.detail || err.message));
+          alert("Voice query failed: " + (err.response?.data?.detail || err.message));
         } finally {
           setLoading(false);
           setRecordingStatus("");
@@ -342,23 +353,19 @@ export default function ChatView() {
       mediaRecorderRef.current.start();
       setIsRecording(true);
       setRecordingStatus("Recording audio... click mic again to send");
-    } catch (err) {
-      alert("Microphone access denied or unavailable.");
+    } catch {
+      alert("Microphone access unavailable or denied.");
       setIsRecording(false);
     }
   };
 
   const stopRecording = () => {
     if (recognitionRef.current) {
-      try {
-        recognitionRef.current.stop();
-      } catch {}
+      try { recognitionRef.current.stop(); } catch {}
       recognitionRef.current = null;
     }
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch {}
+      try { mediaRecorderRef.current.stop(); } catch {}
       mediaRecorderRef.current = null;
     }
     setIsRecording(false);
@@ -370,361 +377,612 @@ export default function ChatView() {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
+  // Starter prompts
+  const starterPrompts = [
+    { title: "Executive Summary", query: "Summarize the key findings, conclusions, and objectives of the document." },
+    { title: "Technical Architecture", query: "What technical architecture, technologies, and methodologies are outlined?" },
+    { title: "Risk & Limitations", query: "Extract all potential risks, caveats, bottlenecks, or constraints mentioned." },
+    { title: "Action Items & Next Steps", query: "What actionable recommendations, milestones, and next steps are proposed?" },
+  ];
+
   return (
-    <div style={{ maxWidth: "1000px", margin: "0 auto", padding: "20px", display: "flex", flexDirection: "column", height: "calc(100vh - 80px)" }}>
+    <div style={{ display: "flex", height: "calc(100vh - 72px)", overflow: "hidden", background: "#f8fafc" }}>
       
-      {/* Top Scope & Controls Bar */}
-      <div className="card-glass" style={{ padding: "12px 18px", marginBottom: "16px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "12px" }}>
-        
-        {/* Document Scope Dropdown */}
-        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-          <Sparkles size={18} color="var(--primary)" />
-          <span style={{ fontSize: "0.88rem", fontWeight: 700 }}>Scope:</span>
-          <select
-            value={filterDoc}
-            onChange={(e) => setFilterDoc(e.target.value)}
-            style={{
-              padding: "6px 12px",
-              borderRadius: "8px",
-              border: "1px solid var(--border)",
-              fontSize: "0.85rem",
-              background: "#ffffff",
-              fontWeight: 500,
-              maxWidth: "260px"
-            }}
-          >
-            <option value="">All Documents (Global)</option>
-            {documents.map((d) => (
-              <option key={d.doc_id} value={d.source_filename}>
-                📄 {d.source_filename}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        {/* Action Controls: Auto Voice-Over & Clear History */}
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          
-          {/* Auto Voice Over Toggle */}
-          <button
-            onClick={() => setAutoVoiceOver(!autoVoiceOver)}
-            title="Auto-read assistant answers aloud"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              padding: "6px 12px",
-              borderRadius: "8px",
-              fontSize: "0.82rem",
-              fontWeight: 600,
-              border: "1px solid " + (autoVoiceOver ? "#16a34a" : "var(--border)"),
-              background: autoVoiceOver ? "#f0fdf4" : "#ffffff",
-              color: autoVoiceOver ? "#16a34a" : "#64748b",
-              cursor: "pointer",
-              transition: "all 0.15s ease",
-            }}
-          >
-            {autoVoiceOver ? <Volume2 size={15} /> : <VolumeX size={15} />}
-            Auto Voice-Over: {autoVoiceOver ? "ON" : "OFF"}
-          </button>
-
-          {/* Clear History Button */}
-          <button
-            onClick={handleClearHistory}
-            title="Clear saved chat history for your account"
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-              padding: "6px 12px",
-              borderRadius: "8px",
-              fontSize: "0.82rem",
-              fontWeight: 600,
-              border: "1px solid var(--border)",
-              background: "#ffffff",
-              color: "#ef4444",
-              cursor: "pointer",
-              transition: "all 0.15s ease",
-            }}
-          >
-            <Trash2 size={14} />
-            Clear History
-          </button>
-        </div>
-      </div>
-
-      {/* Messages Scroll Area */}
-      <div className="card-glass" style={{ flex: 1, padding: "20px", overflowY: "auto", display: "flex", flexDirection: "column", gap: "16px" }}>
-        
-        {historyLoading && (
-          <div style={{ textAlign: "center", padding: "20px", color: "#64748b", fontSize: "0.88rem" }}>
-            <RotateCcw className="animate-spin" size={18} style={{ margin: "0 auto 8px" }} />
-            Loading your persistent chat history...
-          </div>
-        )}
-
-        {messages.map((m) => {
-          const isUser = m.role === "user";
-          const isSpeaking = playingMessageId === m.id;
-
-          return (
-            <div
-              key={m.id}
+      {/* 1. Left Collapsible Thread Sidebar */}
+      {sidebarOpen && (
+        <aside style={{
+          width: "280px",
+          background: "#ffffff",
+          borderRight: "1px solid #e2e8f0",
+          display: "flex",
+          flexDirection: "column",
+          flexShrink: 0,
+          transition: "width 0.2s ease",
+          zIndex: 10
+        }}>
+          {/* New Chat Button */}
+          <div style={{ padding: "16px 16px 12px" }}>
+            <button
+              onClick={startNewChat}
+              className="btn-primary"
               style={{
+                width: "100%",
                 display: "flex",
-                flexDirection: isUser ? "row-reverse" : "row",
-                gap: "12px",
-                alignItems: "flex-start",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "8px",
+                padding: "10px 14px",
+                fontSize: "0.9rem"
               }}
             >
-              {/* Avatar */}
-              <div
+              <Plus size={18} />
+              New Chat Thread
+            </button>
+          </div>
+
+          {/* History Header */}
+          <div style={{
+            padding: "8px 16px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            fontSize: "0.76rem",
+            fontWeight: 700,
+            textTransform: "uppercase",
+            color: "#64748b",
+            letterSpacing: "0.05em"
+          }}>
+            <span>Recent Sessions</span>
+            <span>{rawHistory.length}</span>
+          </div>
+
+          {/* History Thread List */}
+          <div style={{ flex: 1, overflowY: "auto", padding: "0 10px 16px", display: "flex", flexDirection: "column", gap: "4px" }}>
+            {historyLoading ? (
+              <div style={{ padding: "20px", textAlign: "center", color: "#94a3b8", fontSize: "0.82rem" }}>
+                <RotateCcw className="animate-spin" size={16} style={{ margin: "0 auto 6px" }} />
+                Loading sessions...
+              </div>
+            ) : rawHistory.length === 0 ? (
+              <div style={{ padding: "24px 16px", textAlign: "center", color: "#94a3b8", fontSize: "0.82rem" }}>
+                No past chat sessions yet. Ask your first question!
+              </div>
+            ) : (
+              rawHistory.map((h, i) => (
+                <div
+                  key={h.id || i}
+                  onClick={() => {
+                    setInput(h.user_query);
+                  }}
+                  style={{
+                    padding: "9px 12px",
+                    borderRadius: "8px",
+                    cursor: "pointer",
+                    fontSize: "0.84rem",
+                    color: "#334155",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    transition: "all 0.15s ease",
+                    background: "transparent",
+                  }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = "#f1f5f9"}
+                  onMouseLeave={(e) => e.currentTarget.style.background = "transparent"}
+                >
+                  <MessageSquare size={14} color="#64748b" style={{ flexShrink: 0 }} />
+                  <span style={{
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    flex: 1,
+                    fontWeight: 500
+                  }}>
+                    {h.user_query}
+                  </span>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Sidebar Footer */}
+          <div style={{ padding: "12px 16px", borderTop: "1px solid #f1f5f9", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <span style={{ fontSize: "0.78rem", color: "#64748b", fontWeight: 600 }}>
+              {documents.length} Docs Indexed
+            </span>
+            {rawHistory.length > 0 && (
+              <button
+                onClick={handleClearHistory}
                 style={{
+                  background: "none",
+                  border: "none",
+                  color: "#ef4444",
+                  fontSize: "0.75rem",
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px"
+                }}
+              >
+                <Trash2 size={12} /> Clear All
+              </button>
+            )}
+          </div>
+        </aside>
+      )}
+
+      {/* 2. Main Chat Workspace */}
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+        
+        {/* Top Control Bar */}
+        <div style={{
+          padding: "12px 20px",
+          background: "#ffffff",
+          borderBottom: "1px solid #e2e8f0",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: "10px",
+          zIndex: 5
+        }}>
+          {/* Left: Sidebar Toggle + Document Scope */}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              title={sidebarOpen ? "Hide Sessions Sidebar" : "Show Sessions Sidebar"}
+              style={{
+                background: "transparent",
+                border: "1px solid #e2e8f0",
+                borderRadius: "8px",
+                padding: "6px",
+                color: "#64748b",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center"
+              }}
+            >
+              {sidebarOpen ? <PanelLeftClose size={18} /> : <PanelLeft size={18} />}
+            </button>
+
+            {/* Scope Dropdown */}
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <Sparkles size={16} color="#2563eb" />
+              <select
+                value={filterDoc}
+                onChange={(e) => setFilterDoc(e.target.value)}
+                style={{
+                  padding: "6px 12px",
+                  borderRadius: "8px",
+                  border: "1px solid #cbd5e1",
+                  fontSize: "0.85rem",
+                  fontWeight: 600,
+                  color: "#0f172a",
+                  background: "#ffffff",
+                  maxWidth: "280px"
+                }}
+              >
+                <option value="">All Documents (Tenant Scope)</option>
+                {documents.map((d) => (
+                  <option key={d.doc_id} value={d.source_filename}>
+                    📄 {d.source_filename}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Right Controls */}
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            {/* Auto Voice Over Switch */}
+            <button
+              onClick={() => setAutoVoiceOver(!autoVoiceOver)}
+              title="Automatically read assistant responses aloud"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "6px 12px",
+                borderRadius: "8px",
+                fontSize: "0.82rem",
+                fontWeight: 600,
+                border: "1px solid " + (autoVoiceOver ? "#16a34a" : "#cbd5e1"),
+                background: autoVoiceOver ? "#f0fdf4" : "#ffffff",
+                color: autoVoiceOver ? "#16a34a" : "#64748b",
+                cursor: "pointer",
+                transition: "all 0.15s ease"
+              }}
+            >
+              {autoVoiceOver ? <Volume2 size={15} /> : <VolumeX size={15} />}
+              Auto Voice-Over: {autoVoiceOver ? "ON" : "OFF"}
+            </button>
+
+            {/* Export Brief */}
+            <button
+              onClick={handleExportBrief}
+              title="Export this conversation as a grounded Markdown brief"
+              className="btn-secondary"
+              style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "0.82rem", padding: "6px 12px" }}
+            >
+              <Download size={14} />
+              Export Brief
+            </button>
+          </div>
+        </div>
+
+        {/* Messages Stream Container */}
+        <div style={{ flex: 1, overflowY: "auto", padding: "24px", display: "flex", flexDirection: "column", gap: "18px" }}>
+          
+          {/* Welcome Screen & Starter Suggestions when empty */}
+          {messages.length === 0 && (
+            <div style={{ maxWidth: "720px", margin: "40px auto", textAlign: "center" }}>
+              <div style={{
+                width: "56px",
+                height: "56px",
+                background: "linear-gradient(135deg, #2563eb 0%, #4f46e5 100%)",
+                borderRadius: "16px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                margin: "0 auto 16px",
+                boxShadow: "0 10px 25px -5px rgba(37, 99, 235, 0.3)"
+              }}>
+                <Bot size={30} color="white" />
+              </div>
+
+              <h2 style={{ fontSize: "1.6rem", fontWeight: 800, color: "#0f172a", marginBottom: "8px" }}>
+                Enterprise Document Intelligence
+              </h2>
+              <p style={{ color: "#64748b", fontSize: "0.95rem", marginBottom: "28px" }}>
+                Ask questions across your ingested documents. Powered by hybrid keyword-vector retrieval, Upstash Redis sub-5ms caching, and hallucination-free citations.
+              </p>
+
+              {/* Starter Prompt Cards */}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px", textAlign: "left" }}>
+                {starterPrompts.map((s, idx) => (
+                  <div
+                    key={idx}
+                    className="suggestion-card"
+                    onClick={() => {
+                      setInput(s.query);
+                    }}
+                  >
+                    <div style={{ fontWeight: 700, fontSize: "0.9rem", color: "#1e293b", marginBottom: "4px" }}>
+                      {s.title}
+                    </div>
+                    <div style={{ fontSize: "0.8rem", color: "#64748b", lineHeight: 1.4 }}>
+                      {s.query}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Conversation Bubbles */}
+          {messages.map((m) => {
+            const isUser = m.role === "user";
+            const isSpeaking = playingMessageId === m.id;
+
+            return (
+              <div
+                key={m.id}
+                style={{
+                  display: "flex",
+                  flexDirection: isUser ? "row-reverse" : "row",
+                  gap: "12px",
+                  alignItems: "flex-start",
+                  maxWidth: "880px",
+                  margin: "0 auto",
+                  width: "100%"
+                }}
+              >
+                {/* Avatar */}
+                <div style={{
                   width: "36px",
                   height: "36px",
                   borderRadius: "10px",
-                  background: isUser ? "var(--primary)" : "#f1f5f9",
-                  color: isUser ? "white" : "var(--primary)",
+                  background: isUser ? "linear-gradient(135deg, #2563eb, #3b82f6)" : "#ffffff",
+                  color: isUser ? "white" : "#2563eb",
+                  border: isUser ? "none" : "1px solid #e2e8f0",
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
                   flexShrink: 0,
-                }}
-              >
-                {isUser ? <User size={18} /> : <Bot size={18} />}
-              </div>
-
-              {/* Message Bubble */}
-              <div
-                style={{
-                  maxWidth: "80%",
-                  background: isUser ? "var(--primary)" : "#ffffff",
-                  color: isUser ? "white" : "var(--text-main)",
-                  border: isUser ? "none" : "1px solid var(--border)",
-                  borderRadius: "14px",
-                  padding: "14px 18px",
-                  boxShadow: "0 2px 8px rgba(0, 0, 0, 0.04)",
-                  position: "relative",
-                }}
-              >
-                <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.6, fontSize: "0.95rem" }}>
-                  {m.text}
+                  boxShadow: "0 2px 6px rgba(0,0,0,0.04)"
+                }}>
+                  {isUser ? <User size={18} /> : <Bot size={18} />}
                 </div>
 
-                {/* Citations block for assistant */}
-                {!isUser && m.citations && m.citations.length > 0 && (
-                  <div style={{ marginTop: "12px", paddingTop: "10px", borderTop: "1px dashed var(--border)" }}>
-                    <div style={{ fontSize: "0.78rem", fontWeight: 700, color: "#64748b", marginBottom: "6px" }}>
-                      Source References:
-                    </div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                      {m.citations.map((c, i) => (
-                        <span
-                          key={i}
-                          style={{
-                            background: "#f1f5f9",
-                            border: "1px solid #e2e8f0",
-                            borderRadius: "6px",
-                            padding: "3px 8px",
-                            fontSize: "0.75rem",
-                            display: "inline-flex",
-                            alignItems: "center",
-                            gap: "4px",
-                            color: "#334155",
-                          }}
-                        >
-                          <FileText size={12} color="var(--primary)" />
-                          <strong>{c.source_filename}</strong> (Page {c.page_number})
-                        </span>
-                      ))}
-                    </div>
+                {/* Bubble */}
+                <div
+                  className={m.from_cache ? "glow-cache-hit" : ""}
+                  style={{
+                    maxWidth: "80%",
+                    background: isUser ? "#2563eb" : "#ffffff",
+                    color: isUser ? "white" : "#0f172a",
+                    border: isUser ? "none" : "1px solid #e2e8f0",
+                    borderRadius: "16px",
+                    padding: "16px 20px",
+                    boxShadow: isUser 
+                      ? "0 4px 14px rgba(37, 99, 235, 0.2)" 
+                      : "0 4px 18px rgba(15, 23, 42, 0.04)",
+                    position: "relative"
+                  }}
+                >
+                  {/* Message Text */}
+                  <div style={{
+                    whiteSpace: "pre-wrap",
+                    lineHeight: 1.65,
+                    fontSize: "0.95rem",
+                    fontWeight: 400
+                  }}>
+                    {m.text}
                   </div>
-                )}
 
-                {/* Telemetry & Action Bar for Assistant */}
-                {!isUser && m.id !== "intro" && (
-                  <div
-                    style={{
-                      marginTop: "10px",
+                  {/* Interactive Citations Block */}
+                  {!isUser && m.citations && m.citations.length > 0 && (
+                    <div style={{ marginTop: "14px", paddingTop: "12px", borderTop: "1px dashed #e2e8f0" }}>
+                      <div style={{ fontSize: "0.76rem", fontWeight: 700, color: "#64748b", textTransform: "uppercase", marginBottom: "8px", display: "flex", alignItems: "center", gap: "6px" }}>
+                        <ShieldCheck size={14} color="#16a34a" /> Grounded Evidence (Click to inspect):
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px" }}>
+                        {m.citations.map((c, i) => (
+                          <button
+                            key={i}
+                            onClick={() => setActiveCitation(c)}
+                            title="Click to view verbatim chunk context & similarity score"
+                            style={{
+                              background: "#f8fafc",
+                              border: "1px solid #cbd5e1",
+                              borderRadius: "8px",
+                              padding: "4px 10px",
+                              fontSize: "0.78rem",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              color: "#1e293b",
+                              cursor: "pointer",
+                              transition: "all 0.15s ease"
+                            }}
+                            onMouseEnter={(e) => {
+                              e.currentTarget.style.borderColor = "#2563eb";
+                              e.currentTarget.style.background = "#eff6ff";
+                            }}
+                            onMouseLeave={(e) => {
+                              e.currentTarget.style.borderColor = "#cbd5e1";
+                              e.currentTarget.style.background = "#f8fafc";
+                            }}
+                          >
+                            <FileText size={13} color="#2563eb" />
+                            <strong>{c.source_filename}</strong>
+                            <span style={{ color: "#64748b" }}>• p.{c.page_number}</span>
+                            <ChevronRight size={12} color="#94a3b8" />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Assistant Footer Telemetry & Actions */}
+                  {!isUser && m.id !== "intro" && (
+                    <div style={{
+                      marginTop: "12px",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "space-between",
-                      fontSize: "0.74rem",
+                      fontSize: "0.75rem",
                       color: "#94a3b8",
                       flexWrap: "wrap",
-                      gap: "8px",
-                    }}
-                  >
-                    <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
-                      {m.from_cache ? (
-                        <span style={{ color: "#16a34a", fontWeight: 600, display: "flex", alignItems: "center", gap: "2px" }}>
-                          <Zap size={12} /> Cache Hit (&lt;5ms)
-                        </span>
-                      ) : (
-                        <span>Latency: {m.latency_ms ? `${m.latency_ms}ms` : "~1.1s"}</span>
-                      )}
-                      <span>Tokens: {m.tokens}</span>
-                      <span>Cost: ${m.cost_usd ? m.cost_usd.toFixed(5) : "0.00"}</span>
-                    </div>
+                      gap: "8px"
+                    }}>
+                      {/* Telemetry Stats */}
+                      <div style={{ display: "flex", gap: "10px", alignItems: "center" }}>
+                        {m.from_cache ? (
+                          <span style={{ color: "#16a34a", fontWeight: 700, display: "flex", alignItems: "center", gap: "3px" }}>
+                            <Zap size={13} /> Sub-5ms Redis Cache Hit
+                          </span>
+                        ) : (
+                          <span>Latency: {m.latency_ms ? `${m.latency_ms}ms` : "~1.1s"}</span>
+                        )}
+                        <span>Tokens: {m.tokens}</span>
+                        <span>Cost: ${m.cost_usd ? m.cost_usd.toFixed(5) : "0.00"}</span>
+                      </div>
 
-                    <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      {/* Voice Over (Read Aloud) Button */}
-                      <button
-                        onClick={() => playVoiceOver(m.id, m.text)}
-                        title={isSpeaking ? "Stop Voice Over" : "Read aloud with Voice Over"}
-                        style={{
-                          background: isSpeaking ? "#eff6ff" : "none",
-                          border: isSpeaking ? "1px solid #93c5fd" : "none",
-                          borderRadius: "6px",
-                          padding: "3px 7px",
-                          cursor: "pointer",
-                          color: isSpeaking ? "#2563eb" : "#64748b",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "4px",
-                          fontWeight: isSpeaking ? 700 : 500,
-                        }}
-                      >
-                        {isSpeaking ? <VolumeX size={14} /> : <Volume2 size={14} />}
-                        {isSpeaking ? "Speaking..." : "Voice Over"}
-                      </button>
+                      {/* Action buttons */}
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        {/* Voice Over Button */}
+                        <button
+                          onClick={() => playVoiceOver(m.id, m.text)}
+                          title={isSpeaking ? "Pause Voice Over" : "Listen with Voice Over"}
+                          style={{
+                            background: isSpeaking ? "#eff6ff" : "none",
+                            border: isSpeaking ? "1px solid #93c5fd" : "none",
+                            borderRadius: "6px",
+                            padding: "3px 8px",
+                            cursor: "pointer",
+                            color: isSpeaking ? "#2563eb" : "#64748b",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            fontWeight: isSpeaking ? 700 : 500
+                          }}
+                        >
+                          {isSpeaking ? <VolumeX size={14} /> : <Volume2 size={14} />}
+                          {isSpeaking ? "Speaking..." : "Voice Over"}
+                        </button>
 
-                      {/* Copy to Clipboard */}
-                      <button
-                        onClick={() => handleCopy(m.id, m.text)}
-                        style={{
-                          background: "none",
-                          border: "none",
-                          cursor: "pointer",
-                          color: copiedId === m.id ? "#16a34a" : "#94a3b8",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "3px",
-                        }}
-                      >
-                        {copiedId === m.id ? <Check size={13} /> : <Copy size={13} />}
-                        {copiedId === m.id ? "Copied" : "Copy"}
-                      </button>
+                        {/* Copy Button */}
+                        <button
+                          onClick={() => handleCopy(m.id, m.text)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            cursor: "pointer",
+                            color: copiedId === m.id ? "#16a34a" : "#94a3b8",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "3px"
+                          }}
+                        >
+                          {copiedId === m.id ? <Check size={13} /> : <Copy size={13} />}
+                          {copiedId === m.id ? "Copied" : "Copy"}
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          {/* Assistant Generation Spinner */}
+          {loading && (
+            <div style={{ display: "flex", gap: "12px", alignItems: "center", maxWidth: "880px", margin: "0 auto", width: "100%" }}>
+              <div style={{ width: "36px", height: "36px", borderRadius: "10px", background: "#ffffff", border: "1px solid #e2e8f0", display: "flex", alignItems: "center", justifyContent: "center", color: "#2563eb" }}>
+                <Bot size={18} />
+              </div>
+              <div style={{ background: "#ffffff", border: "1px solid #e2e8f0", borderRadius: "14px", padding: "14px 20px", fontSize: "0.9rem", color: "#64748b", display: "flex", alignItems: "center", gap: "10px" }}>
+                <div style={{ width: "16px", height: "16px", border: "2px solid #cbd5e1", borderTopColor: "#2563eb", borderRadius: "50%", animation: "spin 0.6s linear infinite" }}></div>
+                Synthesizing answer from retrieved document chunks...
               </div>
             </div>
-          );
-        })}
+          )}
 
-        {/* Loading Indicator */}
-        {loading && (
-          <div style={{ display: "flex", gap: "12px", alignItems: "center" }}>
-            <div style={{ width: "36px", height: "36px", borderRadius: "10px", background: "#f1f5f9", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--primary)" }}>
-              <Bot size={18} />
-            </div>
-            <div style={{ background: "#ffffff", border: "1px solid var(--border)", borderRadius: "14px", padding: "12px 18px", fontSize: "0.9rem", color: "var(--text-muted)", display: "flex", alignItems: "center", gap: "8px" }}>
-              <div className="spinner" style={{ width: "14px", height: "14px", border: "2px solid #cbd5e1", borderTopColor: "var(--primary)", borderRadius: "50%", animation: "spin 0.6s linear infinite" }}></div>
-              Searching vector store and generating grounded answer...
-            </div>
-          </div>
-        )}
+          <div ref={messagesEndRef} />
+        </div>
 
-        {/* Active Speech Recording Banner */}
+        {/* Active Audio Waveform Banner when recording */}
         {isRecording && (
           <div style={{
             background: "#fef2f2",
-            border: "1px solid #fecaca",
-            padding: "10px 16px",
-            borderRadius: "10px",
+            borderTop: "1px solid #fecaca",
+            padding: "10px 24px",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            color: "#b91c1c",
-            fontSize: "0.88rem",
-            fontWeight: 600
+            color: "#b91c1c"
           }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-              <span className="pulse-mic-dot" style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#ef4444" }}></span>
-              {recordingStatus || "Listening to your voice..."}
+            <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
+              <div style={{ display: "flex", gap: "3px", alignItems: "center", height: "24px" }}>
+                <div className="wave-bar" />
+                <div className="wave-bar" />
+                <div className="wave-bar" />
+                <div className="wave-bar" />
+                <div className="wave-bar" />
+              </div>
+              <span style={{ fontSize: "0.88rem", fontWeight: 600 }}>
+                {recordingStatus || "Listening to speech... Speak clearly"}
+              </span>
             </div>
+
             <button
               onClick={stopRecording}
               style={{
                 background: "#ef4444",
                 color: "white",
                 border: "none",
-                borderRadius: "6px",
-                padding: "4px 10px",
+                borderRadius: "8px",
+                padding: "6px 14px",
                 cursor: "pointer",
-                fontSize: "0.8rem",
+                fontSize: "0.82rem",
                 fontWeight: 600
               }}
             >
-              Finish & Send
+              Stop & Send
             </button>
           </div>
         )}
 
-        <div ref={messagesEndRef} />
+        {/* Input Bar Area */}
+        <div style={{ padding: "16px 24px 20px", background: "#ffffff", borderTop: "1px solid #e2e8f0" }}>
+          <form
+            onSubmit={handleSend}
+            style={{
+              maxWidth: "880px",
+              margin: "0 auto",
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              background: "#ffffff",
+              border: "1px solid #cbd5e1",
+              borderRadius: "14px",
+              padding: "6px 8px 6px 14px",
+              boxShadow: "0 4px 16px rgba(0,0,0,0.04)"
+            }}
+          >
+            {/* Microphone Button */}
+            <button
+              type="button"
+              onClick={toggleRecording}
+              title={isRecording ? "Stop voice recording" : "Speak question with microphone"}
+              style={{
+                background: isRecording ? "#fee2e2" : "transparent",
+                border: "none",
+                color: isRecording ? "#ef4444" : "#64748b",
+                cursor: "pointer",
+                padding: "8px",
+                borderRadius: "10px",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center"
+              }}
+            >
+              {isRecording ? <MicOff size={20} /> : <Mic size={20} />}
+            </button>
+
+            {/* Text Input */}
+            <input
+              type="text"
+              placeholder={filterDoc ? `Ask about "${filterDoc}" (or click mic)...` : "Ask any question about your documents (or click mic)..."}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              disabled={loading}
+              style={{
+                flex: 1,
+                border: "none",
+                outline: "none",
+                fontSize: "0.95rem",
+                background: "transparent",
+                fontFamily: "inherit",
+                color: "#0f172a"
+              }}
+            />
+
+            {/* Send Button */}
+            <button
+              type="submit"
+              className="btn-primary"
+              disabled={loading || !input.trim()}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "6px",
+                padding: "8px 18px",
+                borderRadius: "10px",
+                fontSize: "0.88rem"
+              }}
+            >
+              <Send size={15} />
+              Send
+            </button>
+          </form>
+
+          <div style={{ textAlign: "center", fontSize: "0.72rem", color: "#94a3b8", marginTop: "8px" }}>
+            Answers are grounded strictly in your tenant documents • Press Enter to send
+          </div>
+        </div>
       </div>
 
-      {/* Chat Input & Voice Controls */}
-      <form onSubmit={handleSend} style={{ marginTop: "16px", display: "flex", gap: "10px", alignItems: "center" }}>
-        
-        {/* Microphone Voice Button */}
-        <button
-          type="button"
-          onClick={toggleRecording}
-          title={isRecording ? "Stop recording voice" : "Speak question with microphone"}
-          style={{
-            width: "44px",
-            height: "44px",
-            borderRadius: "10px",
-            border: isRecording ? "2px solid #ef4444" : "1px solid var(--border)",
-            background: isRecording ? "#fef2f2" : "#ffffff",
-            color: isRecording ? "#ef4444" : "#475569",
-            cursor: "pointer",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            flexShrink: 0,
-            transition: "all 0.2s ease"
-          }}
-        >
-          {isRecording ? <MicOff size={20} className="animate-pulse" /> : <Mic size={20} />}
-        </button>
-
-        {/* Text Input Field */}
-        <input
-          className="input-field"
-          type="text"
-          placeholder={filterDoc ? `Ask about "${filterDoc}" (or click mic)...` : "Ask any question about your documents (or click mic)..."}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          disabled={loading}
-          style={{ flex: 1 }}
-        />
-
-        {/* Send Button */}
-        <button
-          type="submit"
-          className="btn-primary"
-          disabled={loading || !input.trim()}
-          style={{ display: "flex", alignItems: "center", gap: "8px", padding: "0 22px", height: "44px" }}
-        >
-          <Send size={16} />
-          Send
-        </button>
-      </form>
+      {/* 3. Citation Inspector Drawer */}
+      <CitationInspector
+        citation={activeCitation}
+        onClose={() => setActiveCitation(null)}
+      />
 
       <style>{`
         @keyframes spin {
           to { transform: rotate(360deg); }
-        }
-        @keyframes pulse-dot {
-          0% { transform: scale(0.95); opacity: 0.8; }
-          50% { transform: scale(1.3); opacity: 1; }
-          100% { transform: scale(0.95); opacity: 0.8; }
-        }
-        .pulse-mic-dot {
-          animation: pulse-dot 1s infinite ease-in-out;
         }
       `}</style>
     </div>
